@@ -218,3 +218,47 @@ def test_diff_helper(app_context):
     expect_rn = '+A change\r\n'
     actual = gitcmds.diff_helper(app_context, ref='HEAD', cached=True)
     assert expect_n in actual or expect_rn in actual
+
+
+def test_oid_diff_range_uses_external_diff_command(app_context):
+    """A configured DAG diff command runs git diff via GIT_EXTERNAL_DIFF"""
+    from unittest.mock import patch
+
+    captured = {}
+
+    def fake_diff(*args, **opts):
+        captured['args'] = args
+        captured['opts'] = opts
+        return (0, '\x1b[31mext diff\x1b[0m', '')
+
+    with patch('cola.gitcmds.prefs.dag_diff_command', return_value='difft'):
+        with patch.object(app_context.git, 'diff', side_effect=fake_diff):
+            out = gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
+
+    assert out == '\x1b[31mext diff\x1b[0m'
+    opts = captured['opts']
+    assert opts['ext_diff'] is True
+    assert opts['_add_env']['GIT_EXTERNAL_DIFF'] == 'difft'
+    # Colour is forced on so the captured (piped) output is coloured.
+    assert opts['_add_env']['DFT_COLOR'] == 'always'
+    assert opts['_add_env']['CLICOLOR_FORCE'] == '1'
+    # Raw output is preserved so ANSI/whitespace survives.
+    assert opts['_raw'] is True
+
+
+def test_oid_diff_range_uses_git_diff_by_default(app_context):
+    """Without a DAG diff command, git diff runs normally (no external diff)"""
+    from unittest.mock import patch
+
+    captured = {}
+
+    def fake_diff(*args, **opts):
+        captured['opts'] = opts
+        return (0, 'diff --git a/f b/f\n', '')
+
+    with patch('cola.gitcmds.prefs.dag_diff_command', return_value=''):
+        with patch.object(app_context.git, 'diff', side_effect=fake_diff):
+            gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
+
+    assert 'ext_diff' not in captured['opts']
+    assert '_add_env' not in captured['opts']
