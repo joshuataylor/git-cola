@@ -1,16 +1,36 @@
 """Tests DAG functionality"""
+import sys
 from unittest.mock import patch
 
 import pytest
 
 from cola.models import dag
+from cola.widgets.dag import CommitTreeWidget
+from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
+from cola.widgets.filelist import FileTreeWidgetItem
+from cola.widgets.filelist import FileWidget
+from qtpy import QtCore
+from qtpy import QtGui
+from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 from .helper import app_context
 from .helper import commit_files
 
 # Prevent unused imports lint errors.
 assert app_context is not None
+
+
+@pytest.fixture(scope='module')
+def qapp():
+    """Provide a QApplication for widget tests."""
+    instance = QtWidgets.QApplication.instance()
+    if instance is None:
+        instance = QtWidgets.QApplication(
+            sys.argv[:1] if sys.argv else ['git-cola-test']
+        )
+    yield instance
 
 
 LOG_TEXT = """
@@ -202,3 +222,96 @@ def test_prepare_labels_two_groups_with_locals():
         ('remotes/origin/main', 'origin/main', 'origin/\u2026'),
         ('heads/main', 'main', None),
     ]
+
+
+def _make_dag_with_lists(app_context):
+    """Build a minimal GitDAG wired with real commit and file list widgets.
+
+    Bypasses GitDAG.__init__ (which constructs the full window) but keeps a real
+    GitDAG instance so eventFilter()'s super() call resolves correctly.
+    """
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    win._widgets_initialized = True
+    win.maxresults = QtWidgets.QSpinBox()
+    win.revtext = QtWidgets.QLineEdit()
+    win.treewidget = CommitTreeWidget(app_context, win)
+    win.filewidget = FileWidget(app_context, win)
+    win.treewidget.installEventFilter(win)
+    win.filewidget.installEventFilter(win)
+    container = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(container)
+    layout.addWidget(win.treewidget)
+    layout.addWidget(win.filewidget)
+    win.setCentralWidget(container)
+    win.show()
+    return win
+
+
+def _tab_event(back=False):
+    key = Qt.Key_Backtab if back else Qt.Key_Tab
+    return QtGui.QKeyEvent(QtCore.QEvent.KeyPress, key, Qt.NoModifier)
+
+
+def test_tab_cycles_focus_between_commit_and_file_lists(qapp, app_context):
+    """Tab and Shift+Tab move focus between the commit list and the file list."""
+    win = _make_dag_with_lists(app_context)
+    tree = win.treewidget
+    files = win.filewidget
+
+    # Spy on each pane's setFocus so the assertions do not depend on the
+    # offscreen platform actually delivering and activating focus.
+    tree_focus = []
+    files_focus = []
+    tree.setFocus = lambda *a, **k: tree_focus.append(True)
+    files.setFocus = lambda *a, **k: files_focus.append(True)
+
+    # Tab on the commit list -> focus the file list.
+    assert win.eventFilter(tree, _tab_event()) is True
+    assert len(files_focus) == 1
+
+    # Tab on the file list -> focus the commit list.
+    assert win.eventFilter(files, _tab_event()) is True
+    assert len(tree_focus) == 1
+
+    # Shift+Tab cycles between the same two panes.
+    assert win.eventFilter(tree, _tab_event(back=True)) is True
+    assert len(files_focus) == 2
+
+
+def test_tab_highlights_first_file(qapp, app_context):
+    """Tabbing into the file list selects the first file when none is selected."""
+    win = _make_dag_with_lists(app_context)
+    files = win.filewidget
+    for name in ('cola/git.py', 'test/git_test.py'):
+        files.addTopLevelItem(FileTreeWidgetItem('6\t1\t' + name))
+
+    assert not files.selectedItems()
+
+    # Tab into the file list.
+    assert win.eventFilter(win.treewidget, _tab_event()) is True
+
+    # The first file is both current and selected (highlighted), so arrow keys
+    # move from it rather than jumping to the second file.
+    current = files.currentItem()
+    assert current is not None
+    assert current.text(0) == 'cola/git.py'
+    assert files.selectedItems() == [current]
+
+
+def test_tab_keeps_existing_file_selection(qapp, app_context):
+    """Tabbing into the file list does not move an existing selection."""
+    win = _make_dag_with_lists(app_context)
+    files = win.filewidget
+    for name in ('cola/git.py', 'test/git_test.py'):
+        files.addTopLevelItem(FileTreeWidgetItem('6\t1\t' + name))
+
+    # Pre-select the second file.
+    second = files.topLevelItem(1)
+    second.setSelected(True)
+    files.setCurrentItem(second)
+
+    win.eventFilter(win.treewidget, _tab_event())
+
+    # The existing selection is preserved, not reset to the first file.
+    assert files.selectedItems() == [second]
