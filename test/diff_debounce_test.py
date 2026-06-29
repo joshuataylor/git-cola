@@ -166,3 +166,33 @@ def test_file_within_commit_is_separate_position(qapp, app_context):
     widget.set_diff_oid('a' * 40, filename='some/file.py')
     widget.diff.set_scrollbar_target.assert_called_with(None)
     assert widget._scroll_positions[('a' * 40, None)] == 123
+
+
+def test_set_diff_routes_ansi_to_external_renderer(qapp, app_context):
+    """ANSI output is rendered via set_ansi_diff when a DAG diff command is set."""
+    from unittest.mock import patch
+
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+    ansi_diff = '\x1b[31mext\x1b[0m'
+
+    with patch('cola.widgets.diff.prefs.dag_diff_command', return_value='difft'):
+        widget.set_diff(ansi_diff)
+
+    widget.diff.set_ansi_diff.assert_called_once_with(ansi_diff)
+    widget.diff.set_diff.assert_not_called()
+
+
+def test_set_diff_uses_plain_renderer_without_command(qapp, app_context):
+    """Without a DAG diff command, output goes through the normal renderer."""
+    from unittest.mock import patch
+
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+    ansi_diff = '\x1b[31mext\x1b[0m'
+
+    with patch('cola.widgets.diff.prefs.dag_diff_command', return_value=''):
+        widget.set_diff(ansi_diff)
+
+    widget.diff.set_diff.assert_called_once_with(ansi_diff)
+    widget.diff.set_ansi_diff.assert_not_called()
