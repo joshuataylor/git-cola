@@ -587,7 +587,9 @@ class MainView(standard.MainWindow):
         )
         self.browse_action.setIcon(icons.cola())
 
-        self.dag_action = qtutils.add_action(self, N_('DAG...'), self.git_dag)
+        self.dag_action = qtutils.add_action(
+            self, N_('DAG...'), self.git_dag, hotkeys.DAG
+        )
         self.dag_action.setIcon(icons.cola())
 
         self.rebase_start_action = qtutils.add_action(
