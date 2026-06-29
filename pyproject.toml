@@ -49,6 +49,8 @@ extras = [
     # Enables server/client functionality.
     "websockets == 15.0.1",
     "msgpack >= 1.1.2",
+    # Sets the process title to "git-cola" in process listings.
+    "setproctitle",
 ]
 # Developer tools.
 dev = [
