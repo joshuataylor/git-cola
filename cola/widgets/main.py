@@ -637,6 +637,7 @@ class MainView(standard.MainWindow):
             icons.cola(),
             N_('DAG...'),
             self.git_dag,
+            hotkeys.DAG,
         )
 
         self.rebase_start_action = qtutils.add_action_with_icon(
