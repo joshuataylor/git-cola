@@ -2046,9 +2046,7 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # already moved on can be discarded in set_diff().
         self._diff_token += 1
         token = self._diff_token
-        self.context.runtask.start(
-            task, result=lambda diff: self.set_diff(diff, token)
-        )
+        self.context.runtask.start(task, result=lambda diff: self.set_diff(diff, token))
 
     def set_diff_oid(self, oid, filename=None):
         """Set the diff from a single commit object ID"""
