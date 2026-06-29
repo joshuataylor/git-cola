@@ -105,3 +105,49 @@ def test_set_diff_without_token_applies_immediately(qapp, app_context):
 
     widget.set_diff('direct diff')
     widget.diff.set_diff.assert_called_once_with('direct diff')
+
+
+def test_switching_commit_resets_scrollbar(qapp, app_context):
+    """Loading a different commit's diff starts at the top, not the old scroll."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+
+    # First commit: nothing was displayed before, so it is a new diff.
+    widget.set_diff_oid('a' * 40)
+    widget.diff.reset_scrollbar.assert_called_once()
+    widget.diff.save_scrollbar.assert_not_called()
+
+    # Switching to a different commit must reset, not preserve, the scroll.
+    widget.diff.reset_scrollbar.reset_mock()
+    widget.set_diff_oid('b' * 40)
+    widget.diff.reset_scrollbar.assert_called_once()
+    widget.diff.save_scrollbar.assert_not_called()
+
+
+def test_same_commit_rerender_preserves_scrollbar(qapp, app_context):
+    """Re-rendering the same diff (e.g. word-wrap toggle) keeps the scroll."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+
+    # Show a commit, then re-load the identical diff key.
+    widget.set_diff_oid('a' * 40)
+    widget.diff.save_scrollbar.reset_mock()
+    widget.diff.reset_scrollbar.reset_mock()
+
+    widget.set_diff_oid('a' * 40)
+    widget.diff.save_scrollbar.assert_called_once()
+    widget.diff.reset_scrollbar.assert_not_called()
+
+
+def test_file_within_commit_resets_scrollbar(qapp, app_context):
+    """Selecting a different file in the same commit is a different diff."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+
+    widget.set_diff_oid('a' * 40)
+    widget.diff.reset_scrollbar.reset_mock()
+
+    # Same oid, different filename -> different diff key -> reset to top.
+    widget.set_diff_oid('a' * 40, filename='some/file.py')
+    widget.diff.reset_scrollbar.assert_called_once()
+    widget.diff.save_scrollbar.assert_not_called()
