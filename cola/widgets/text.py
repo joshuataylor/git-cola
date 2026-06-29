@@ -1150,6 +1150,8 @@ class TextLabel(QtWidgets.QLabel):
         self._text_format = text_format  # The QTextFormat usef for this label.
         self._elide = False
         self._metrics = QtGui.QFontMetrics(self.font())
+        self._saved_selection = None
+        self._press_pos = None
 
         self.setTextFormat(text_format)
         self.setCursor(Qt.PointingHandCursor)
@@ -1282,16 +1284,30 @@ class TextLabel(QtWidgets.QLabel):
 
     def mousePressEvent(self, event):
         self._saved_selection = self.selectedText()
-        super().mouseReleaseEvent(event)
+        # Remember where the press started so that mouseReleaseEvent() can tell a
+        # plain click (copy-on-click) apart from a click-and-drag (text selection).
+        self._press_pos = event.pos()
+        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """Copy the text label when clicked"""
-        """Copy text when clicked"""
-        # This makes it impossible to select text by clicking and dragging while still
-        # allowing copy-on-click to be a one-click affair.
+        """Copy the text label when clicked, but not when selecting text
+
+        Copy-on-click is off by default. When a subclass opts in, only a plain
+        click (no pointer movement, no existing selection) copies; a click and
+        drag is a text selection and is left untouched, otherwise the selection
+        would be replaced by a select-all flash (copy_all -> select_all) and
+        then cleared by the selection timer.
+        """
+        moved = (
+            self._press_pos is not None
+            and (event.pos() - self._press_pos).manhattanLength()
+            > QtWidgets.QApplication.startDragDistance()
+        )
+        self._press_pos = None
         if (
             self._copy_on_click
             and event.button() == Qt.LeftButton
+            and not moved
             and not self.selectedText()
             and not self._saved_selection
         ):
@@ -1302,7 +1318,7 @@ class TextLabel(QtWidgets.QLabel):
 class PlainTextLabel(TextLabel):
     """A plaintext label that elides its display"""
 
-    def __init__(self, copy_on_click=True, selectable=True, parent=None):
+    def __init__(self, copy_on_click=False, selectable=True, parent=None):
         super().__init__(
             copy_on_click=copy_on_click,
             selectable=selectable,
