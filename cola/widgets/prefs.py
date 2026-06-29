@@ -313,6 +313,16 @@ class SettingsFormWidget(FormWidget):
         )
         self.dag_max_diff_size.setSpecialValueText(N_('Unlimited'))
 
+        self.dag_diff_command = QtWidgets.QLineEdit()
+        self.dag_diff_command.setToolTip(
+            N_(
+                'External diff command for rendering commit diffs in Git DAG,\n'
+                'e.g. "difft" for difftastic. "git diff" is run with\n'
+                'GIT_EXTERNAL_DIFF set to this command and its coloured output\n'
+                "is shown read-only. Leave empty to use git's built-in diff."
+            )
+        )
+
         self.override_editor = QtWidgets.QLineEdit()
         self.override_editor.setToolTip(
             N_('Override the GUI editor setting when configured')
@@ -399,6 +409,7 @@ class SettingsFormWidget(FormWidget):
         )
         self.add_row(N_('Fixup Previous Commit Count'), self.fixup_commit_count)
         self.add_row(N_('Git DAG Maximum Diff Size'), self.dag_max_diff_size)
+        self.add_row(N_('Git DAG Diff Command'), self.dag_diff_command)
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Detect Conflict Markers'), self.check_conflicts)
@@ -453,6 +464,10 @@ class SettingsFormWidget(FormWidget):
             prefs.DAG_MAX_DIFF_SIZE: (
                 self.dag_max_diff_size,
                 Defaults.dag_max_diff_size,
+            ),
+            prefs.DAG_DIFF_COMMAND: (
+                self.dag_diff_command,
+                Defaults.dag_diff_command,
             ),
             prefs.SORT_BOOKMARKS: (self.sort_bookmarks, Defaults.sort_bookmarks),
             prefs.DIFFTOOL: (self.difftool, Defaults.difftool),
