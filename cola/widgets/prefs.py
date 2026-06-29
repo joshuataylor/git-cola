@@ -301,6 +301,16 @@ class SettingsFormWidget(FormWidget):
         self.tabwidth = standard.SpinBox(maxi=42)
         self.textwidth = standard.SpinBox(maxi=150)
 
+        tooltip = N_(
+            'Truncate diffs larger than this size (in kilobytes) in Git DAG\n'
+            'so that selecting a commit with a very large diff stays\n'
+            'responsive. Set to "Unlimited" to disable truncation.'
+        )
+        self.dag_max_diff_size = standard.SpinBox(
+            mini=0, maxi=1048576, step=256, digits=7, suffix='\tKB', tooltip=tooltip
+        )
+        self.dag_max_diff_size.setSpecialValueText(N_('Unlimited'))
+
         self.editor = QtWidgets.QLineEdit()
         self.editor.setToolTip(N_('The main GUI editor that must block until it exits'))
 
@@ -360,6 +370,7 @@ class SettingsFormWidget(FormWidget):
             N_('Load Previous Commit Message Count'), self.load_commitmsg_count
         )
         self.add_row(N_('Fixup Previous Commit Count'), self.fixup_commit_count)
+        self.add_row(N_('Git DAG Maximum Diff Size'), self.dag_max_diff_size)
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Detect Conflict Markers'), self.check_conflicts)
@@ -403,6 +414,10 @@ class SettingsFormWidget(FormWidget):
             prefs.FIXUP_COMMIT_COUNT: (
                 self.fixup_commit_count,
                 Defaults.fixup_commit_count,
+            ),
+            prefs.DAG_MAX_DIFF_SIZE: (
+                self.dag_max_diff_size,
+                Defaults.dag_max_diff_size,
             ),
             prefs.SORT_BOOKMARKS: (self.sort_bookmarks, Defaults.sort_bookmarks),
             prefs.DIFFTOOL: (self.difftool, Defaults.difftool),

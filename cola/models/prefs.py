@@ -25,6 +25,7 @@ CHECK_CONFLICTS = 'cola.checkconflicts'
 CHECK_PUBLISHED_COMMITS = 'cola.checkpublishedcommits'
 COMMENT_CHAR = 'core.commentchar'
 COMMIT_CLEANUP = 'commit.cleanup'
+DAG_MAX_DIFF_SIZE = 'cola.dagmaxdiffsize'
 DICTIONARY = 'cola.dictionary'
 DIFFCONTEXT = 'gui.diffcontext'
 DIFFTOOL = 'diff.tool'
@@ -143,6 +144,7 @@ class Defaults:
     autodetect_proxy = True
     background_editor = ''
     blame_viewer = 'git gui blame'
+    dag_max_diff_size = 1024
     block_cursor = True
     bold_fonts = False
     bold_headers = False
@@ -383,6 +385,16 @@ def maxrecent(context) -> int:
 def fixup_commit_count(context) -> int:
     """The number of commits for the Fixup Previous Commit menu"""
     return context.cfg.get(FIXUP_COMMIT_COUNT, default=Defaults.fixup_commit_count)
+
+
+def dag_max_diff_size(context) -> int:
+    """The maximum DAG diff size in kilobytes (0 means unlimited)
+
+    Large commits (e.g. ones touching a big file) produce very large diffs that
+    are slow to load and syntax-highlight. The DAG diff is capped at this size
+    by default so that selecting such a commit stays responsive.
+    """
+    return context.cfg.get(DAG_MAX_DIFF_SIZE, default=Defaults.dag_max_diff_size)
 
 
 def load_commitmsg_count(context) -> int:
