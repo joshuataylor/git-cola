@@ -330,15 +330,17 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         if self.numbers:
             self.numbers.refresh_size()
 
+    def scrollbar_value(self):
+        """Return the current vertical scrollbar value, or None"""
+        scrollbar = self.verticalScrollBar()
+        if scrollbar:
+            return get(scrollbar)
+        return None
+
     def save_scrollbar(self):
         """Save the scrollbar value, but only on the first call"""
         if self.scrollvalue is None:
-            scrollbar = self.verticalScrollBar()
-            if scrollbar:
-                scrollvalue = get(scrollbar)
-            else:
-                scrollvalue = None
-            self.scrollvalue = scrollvalue
+            self.scrollvalue = self.scrollbar_value()
 
     def restore_scrollbar(self):
         """Restore the scrollbar and clear state"""
@@ -348,12 +350,17 @@ class DiffTextEdit(VimHintedPlainTextEdit):
             scrollbar.setValue(scrollvalue)
         self.scrollvalue = None
 
-    def reset_scrollbar(self):
-        """Discard any saved scroll position so the next diff starts at the top"""
-        self.scrollvalue = None
+    def set_scrollbar_target(self, value):
+        """Set the scroll position to restore after the next diff is loaded
+
+        A value of None starts the next diff at the top. The target is stored as
+        a concrete value (never None) so that set_diff()'s save_scrollbar() does
+        not overwrite it with the pre-load position.
+        """
+        self.scrollvalue = value or 0
         scrollbar = self.verticalScrollBar()
         if scrollbar:
-            scrollbar.setValue(0)
+            scrollbar.setValue(self.scrollvalue)
 
     def set_diff(self, diff):
         """Set the diff text and restore the scrollbar position post-update"""
@@ -1989,10 +1996,13 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self.oid_start = None
         self.oid_end = None
         self.options = options
-        # Identity of the diff currently shown. Used to decide whether to keep
-        # the scroll position: preserve it when re-rendering the same diff (e.g.
-        # toggling word-wrap), but reset to the top when switching commits.
+        # Identity of the diff currently shown, and a per-diff memory of scroll
+        # positions. Re-rendering the same diff (e.g. toggling word-wrap) keeps
+        # its position; switching commits remembers the outgoing commit's scroll
+        # and restores the incoming one's (or starts at the top if unseen). The
+        # memory is in-process only and is not persisted across DAG sessions.
         self._displayed_diff_key = None
+        self._scroll_positions = {}
 
         # Debounce diff loading so that rapidly moving the selection (e.g.
         # holding an arrow key in the DAG) only loads the diff for the commit
@@ -2074,10 +2084,11 @@ class CommitDiffWidget(QtWidgets.QWidget):
     def start_diff_task(self, task, diff_key=None):
         """Clear the display and start a diff-gathering task
 
-        diff_key identifies the diff being loaded. When it matches the diff
-        currently shown (e.g. re-rendering after a word-wrap toggle) the scroll
-        position is preserved; when it differs (a different commit or file) the
-        new diff is shown from the top.
+        diff_key identifies the diff being loaded. Re-rendering the diff already
+        shown (e.g. after a word-wrap toggle) keeps the scroll position. When
+        switching to a different diff the outgoing position is remembered and
+        the incoming diff is restored to its remembered position, or shown from
+        the top if it has not been viewed yet.
         """
         # Cap the diff size so that selecting a commit with a very large diff
         # (e.g. one that adds a big file) stays responsive. The DAG setting is
@@ -2088,9 +2099,14 @@ class CommitDiffWidget(QtWidgets.QWidget):
         if diff_key == self._displayed_diff_key:
             self.diff.save_scrollbar()
         else:
-            # Switching to a different diff: start at the top rather than
-            # inheriting the previous diff's scroll position.
-            self.diff.reset_scrollbar()
+            # Remember where we were in the diff we are leaving, then restore
+            # the position previously saved for the diff we are entering (None
+            # -> top for a diff not seen yet).
+            if self._displayed_diff_key is not None:
+                value = self.diff.scrollbar_value()
+                if value is not None:
+                    self._scroll_positions[self._displayed_diff_key] = value
+            self.diff.set_scrollbar_target(self._scroll_positions.get(diff_key))
         self._displayed_diff_key = diff_key
         cmds.do(cmds.DiffLoading, self.context)
         # Stamp the task so that a result arriving after the selection has
@@ -2170,6 +2186,12 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self.gravatar_label.set_email(email)
 
     def clear(self):
+        # Remember where we were so returning to this commit restores it.
+        if self._displayed_diff_key is not None:
+            value = self.diff.scrollbar_value()
+            if value is not None:
+                self._scroll_positions[self._displayed_diff_key] = value
+            self._displayed_diff_key = None
         self.date_label.set_text('')
         self.oid_label.set_oid('')
         self.author_label.set_text('')
