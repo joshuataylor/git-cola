@@ -1948,10 +1948,10 @@ class ObjectIdLabel(PlainTextLabel):
     """Interactive object IDs"""
 
     def __init__(self, context, oid='', parent=None):
-        super().__init__(copy_on_click=True, parent=parent)
+        super().__init__(parent=parent)
         self.context = context
         self.oid = oid
-        self.setToolTip(N_('Click to Copy'))
+        self.setToolTip(N_('Right-click to Copy'))
         self._copy_short_action = qtutils.add_action_with_icon(
             self,
             icons.copy(),
@@ -1973,7 +1973,7 @@ class ObjectIdLabel(PlainTextLabel):
         self.oid = oid
         self.set_text(oid)
 
-    def _copy_short(self, clicked=False):
+    def _copy_short(self):
         """Copy the abbreviated commit ID"""
         abbrev = prefs.abbrev(self.context)
         qtutils.set_clipboard(self.oid[:abbrev])
@@ -1983,9 +1983,6 @@ class ObjectIdLabel(PlainTextLabel):
         """Copy the full commit ID"""
         qtutils.set_clipboard(self.oid)
         self.start_selection_timer()
-
-    def copy_all_callback(self):
-        self._copy_short(clicked=True)
 
     def context_menu_actions(self, menu):
         """Display a custom context menu"""
