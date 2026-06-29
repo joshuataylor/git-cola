@@ -259,8 +259,12 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         numbers_visible=False,
     ) -> None:
         super().__init__(context, '', parent=parent)
-        # Diff/patch syntax highlighter
+        # Diff/patch syntax highlighter.
+        # max_diff_size is expressed in units of max_diff_size_unit bytes; 0
+        # means unlimited. The main diff editor counts in MB; the DAG diff
+        # counts in KB (set by CommitDiffWidget).
         self.max_diff_size = 0
+        self.max_diff_size_unit = 1024 * 1024  # MB
         self.highlighter = DiffSyntaxHighlighter(
             context, self.document(), is_commit=is_commit, whitespace=whitespace
         )
@@ -358,7 +362,7 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     def set_diff(self, diff):
         """Set the diff text and restore the scrollbar position post-update"""
         diff = diff.rstrip('\n')  # diffs include two empty newlines
-        diff = _truncate_diff(diff, self.max_diff_size)
+        diff = _truncate_diff(diff, self.max_diff_size * self.max_diff_size_unit)
 
         self.save_scrollbar()
 
@@ -547,24 +551,42 @@ def _strip_diff(value):
     return value
 
 
-def _truncate_diff(value, size):
-    """Truncate the diff to the specified number of megabytes"""
-    if size == 0:  # Unlimited
+def _human_size(num_bytes):
+    """Return a human-readable KB/MB string for a byte count"""
+    kb = 1024
+    mb = kb * 1024
+    if num_bytes >= mb:
+        return '%.1f MB' % (num_bytes / mb)
+    return '%.0f KB' % (num_bytes / kb)
+
+
+def _truncate_diff(value, count):
+    """Truncate the diff to the specified number of bytes
+
+    `count` is a byte budget. Technically it counts unicode tokens not bytes,
+    but that is good enough since diffs are usually utf-8 text. A count of 0
+    means unlimited.
+    """
+    if count == 0:  # Unlimited
         return value
 
-    # Technically size represents the number of unicode tokens not bytes, but it's good
-    # enough given that usually we're dealing with utf-8 text.
-    count = size * 1024 * 1024
-    if len(value) <= count:
+    total = len(value)
+    if total <= count:
         return value
 
-    # Find the last newline starting from size so that the last line is a full, complete
-    # line rather than an invalid truncated invalid diff value.
+    # Find the last newline before the budget so that the last line is a full,
+    # complete line rather than a truncated, invalid diff value.
     newline = value.rfind('\n', 0, count)
     if newline == -1:
-        return value[:count]
+        truncated = value[:count]
+    else:
+        truncated = value[:newline]
 
-    return value[:newline]
+    notice = N_('... diff truncated at %(size)s (%(total)s total) ...') % {
+        'size': _human_size(count),
+        'total': _human_size(total),
+    }
+    return truncated + '\n' + notice
 
 
 class DiffLineNumbers(TextDecorator):
@@ -2219,6 +2241,12 @@ class CommitDiffWidget(QtWidgets.QWidget):
 
     def start_diff_task(self, task):
         """Clear the display and start a diff-gathering task"""
+        # Cap the diff size so that selecting a commit with a very large diff
+        # (e.g. one that adds a big file) stays responsive. The DAG setting is
+        # in KB. Re-read each time so that changing the cola.dagmaxdiffsize
+        # setting takes effect on the next selection; 0 means unlimited.
+        self.diff.max_diff_size_unit = 1024  # KB
+        self.diff.max_diff_size = prefs.dag_max_diff_size(self.context)
         self.diff.save_scrollbar()
         cmds.do(cmds.DiffLoading, self.context)
         # Stamp the task so that a result arriving after the selection has
