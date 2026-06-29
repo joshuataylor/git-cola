@@ -11,6 +11,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
 from .. import actions
+from .. import ansi
 from .. import cmds
 from .. import core
 from .. import diffparse
@@ -375,6 +376,9 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         self.save_scrollbar()
 
+        # Recover from a prior ANSI render (set_ansi_diff disables these).
+        self.highlighter.set_enabled(True)
+
         lines = self.diff_lines.parse(diff)
         if self.numbers:
             # The diff_lines parser is shared with self.numbers and updated above.
@@ -384,6 +388,33 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         self._current_diff_text = diff
         self.update_intraline_diff_spans()
 
+        self.restore_scrollbar()
+
+    def set_ansi_diff(self, diff):
+        """Render ANSI-coloured diff text from an external diff tool
+
+        Used when an external Git DAG diff command (e.g. difftastic) produces
+        coloured output. The built-in unified-diff highlighter is disabled and
+        the ANSI SGR sequences are converted to Qt character formats.
+        """
+        diff = _truncate_diff(diff, self.max_diff_size * self.max_diff_size_unit)
+        self.save_scrollbar()
+
+        # The output is not a unified diff, so the line-number gutter and the
+        # diff syntax highlighter do not apply.
+        self.diff_lines.parse('')
+        if self.numbers:
+            self.numbers.hide()
+        self.highlighter.set_enabled(False)
+
+        spans = ansi.parse_ansi(diff)
+        document = self.document()
+        document.clear()
+        cursor = QtGui.QTextCursor(document)
+        for span in spans:
+            cursor.insertText(span.text, _ansi_char_format(span.style))
+
+        self._current_diff_text = ansi.strip_ansi(diff)
         self.restore_scrollbar()
 
     # vvv inline-diff highlight begin vvv
@@ -558,6 +589,22 @@ def _strip_diff(value):
     if value.startswith(('+', '-', ' ')):
         return value[1:]
     return value
+
+
+def _ansi_char_format(style):
+    """Build a QTextCharFormat from a parsed ANSI Style"""
+    fmt = QtGui.QTextCharFormat()
+    if style.foreground is not None:
+        fmt.setForeground(QtGui.QColor(*style.foreground))
+    if style.background is not None:
+        fmt.setBackground(QtGui.QColor(*style.background))
+    if style.bold:
+        fmt.setFontWeight(QtGui.QFont.Bold)
+    if style.italic:
+        fmt.setFontItalic(True)
+    if style.underline:
+        fmt.setFontUnderline(True)
+    return fmt
 
 
 def _human_size(num_bytes):
@@ -2196,7 +2243,13 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # Drop results from superseded tasks; only the latest token applies.
         if token is not None and token != self._diff_token:
             return
-        self.diff.set_diff(diff)
+        # An external diff command (e.g. difftastic) produces ANSI-coloured,
+        # non-unified output. Render it as ANSI rather than feeding it to the
+        # unified-diff highlighter.
+        if prefs.dag_diff_command(self.context) and ansi.has_ansi(diff):
+            self.diff.set_ansi_diff(diff)
+        else:
+            self.diff.set_diff(diff)
 
     def set_details(self, oid, author, email, date, summary):
         template_args = {'author': author, 'email': email}

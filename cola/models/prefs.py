@@ -25,6 +25,7 @@ CHECK_CONFLICTS = 'cola.checkconflicts'
 CHECK_PUBLISHED_COMMITS = 'cola.checkpublishedcommits'
 COMMENT_CHAR = 'core.commentchar'
 COMMIT_CLEANUP = 'commit.cleanup'
+DAG_DIFF_COMMAND = 'cola.dagdiffcommand'
 DAG_MAX_DIFF_SIZE = 'cola.dagmaxdiffsize'
 DICTIONARY = 'cola.dictionary'
 DIFFCONTEXT = 'gui.diffcontext'
@@ -144,6 +145,7 @@ class Defaults:
     autodetect_proxy = True
     background_editor = ''
     blame_viewer = 'git gui blame'
+    dag_diff_command = ''
     dag_max_diff_size = 1024
     block_cursor = True
     bold_fonts = False
@@ -385,6 +387,16 @@ def maxrecent(context) -> int:
 def fixup_commit_count(context) -> int:
     """The number of commits for the Fixup Previous Commit menu"""
     return context.cfg.get(FIXUP_COMMIT_COUNT, default=Defaults.fixup_commit_count)
+
+
+def dag_diff_command(context) -> str:
+    """An external diff command for rendering commit diffs in Git DAG
+
+    When set, the DAG diff pane runs "git diff" with GIT_EXTERNAL_DIFF set to
+    this command (e.g. "difft" for difftastic) and shows its output read-only,
+    rather than git's built-in unified diff. Empty means use git's diff.
+    """
+    return context.cfg.get(DAG_DIFF_COMMAND, default=Defaults.dag_diff_command)
 
 
 def dag_max_diff_size(context) -> int:
