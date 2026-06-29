@@ -464,6 +464,26 @@ def oid_diff_range(
     opts = common_diff_opts(context)
     if encoding:
         opts['_encoding'] = encoding
+
+    # When an external diff command is configured for Git DAG (e.g. difftastic),
+    # run "git diff" through it via GIT_EXTERNAL_DIFF and return its raw output.
+    # Git handles file extraction, renames and the empty-tree fallback for us.
+    diff_command = prefs.dag_diff_command(context)
+    if diff_command:
+        opts = dict(opts)
+        opts['ext_diff'] = True  # --ext-diff: honour GIT_EXTERNAL_DIFF
+        opts['_raw'] = True  # preserve trailing whitespace/newlines in the output
+        # External tools suppress colour when their output is not a terminal,
+        # which it is not here (we capture it via a pipe). Force colour on for
+        # the tools that honour these variables (difftastic via DFT_COLOR;
+        # CLICOLOR_FORCE is respected by many BSD/clicolor-aware tools) so the
+        # captured output is coloured and we can render it.
+        opts['_add_env'] = {
+            'GIT_EXTERNAL_DIFF': diff_command,
+            'DFT_COLOR': 'always',
+            'CLICOLOR_FORCE': '1',
+        }
+
     _add_filename(args, filename)
     status, out, _ = context.git.diff(*args, **opts)
     if status != 0:
