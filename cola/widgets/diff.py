@@ -348,6 +348,13 @@ class DiffTextEdit(VimHintedPlainTextEdit):
             scrollbar.setValue(scrollvalue)
         self.scrollvalue = None
 
+    def reset_scrollbar(self):
+        """Discard any saved scroll position so the next diff starts at the top"""
+        self.scrollvalue = None
+        scrollbar = self.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(0)
+
     def set_diff(self, diff):
         """Set the diff text and restore the scrollbar position post-update"""
         diff = diff.rstrip('\n')  # diffs include two empty newlines
@@ -1982,6 +1989,10 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self.oid_start = None
         self.oid_end = None
         self.options = options
+        # Identity of the diff currently shown. Used to decide whether to keep
+        # the scroll position: preserve it when re-rendering the same diff (e.g.
+        # toggling word-wrap), but reset to the top when switching commits.
+        self._displayed_diff_key = None
 
         # Debounce diff loading so that rapidly moving the selection (e.g.
         # holding an arrow key in the DAG) only loads the diff for the commit
@@ -2060,15 +2071,27 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self.options = options
         self.diff.set_options(options)
 
-    def start_diff_task(self, task):
-        """Clear the display and start a diff-gathering task"""
+    def start_diff_task(self, task, diff_key=None):
+        """Clear the display and start a diff-gathering task
+
+        diff_key identifies the diff being loaded. When it matches the diff
+        currently shown (e.g. re-rendering after a word-wrap toggle) the scroll
+        position is preserved; when it differs (a different commit or file) the
+        new diff is shown from the top.
+        """
         # Cap the diff size so that selecting a commit with a very large diff
         # (e.g. one that adds a big file) stays responsive. The DAG setting is
         # in KB. Re-read each time so that changing the cola.dagmaxdiffsize
         # setting takes effect on the next selection; 0 means unlimited.
         self.diff.max_diff_size_unit = 1024  # KB
         self.diff.max_diff_size = prefs.dag_max_diff_size(self.context)
-        self.diff.save_scrollbar()
+        if diff_key == self._displayed_diff_key:
+            self.diff.save_scrollbar()
+        else:
+            # Switching to a different diff: start at the top rather than
+            # inheriting the previous diff's scroll position.
+            self.diff.reset_scrollbar()
+        self._displayed_diff_key = diff_key
         cmds.do(cmds.DiffLoading, self.context)
         # Stamp the task so that a result arriving after the selection has
         # already moved on can be discarded in set_diff().
@@ -2079,11 +2102,11 @@ class CommitDiffWidget(QtWidgets.QWidget):
     def set_diff_oid(self, oid, filename=None):
         """Set the diff from a single commit object ID"""
         task = DiffInfoTask(self.context, oid, filename)
-        self.start_diff_task(task)
+        self.start_diff_task(task, diff_key=(oid, filename))
 
     def set_diff_range(self, start, end, filename=None):
         task = DiffRangeTask(self.context, start + '~', end, filename)
-        self.start_diff_task(task)
+        self.start_diff_task(task, diff_key=(start, end, filename))
 
     def commits_selected(self, commits):
         """Display an appropriate diff when commits are selected"""
