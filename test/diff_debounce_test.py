@@ -107,20 +107,14 @@ def test_set_diff_without_token_applies_immediately(qapp, app_context):
     widget.diff.set_diff.assert_called_once_with('direct diff')
 
 
-def test_switching_commit_resets_scrollbar(qapp, app_context):
-    """Loading a different commit's diff starts at the top, not the old scroll."""
+def test_first_commit_starts_at_top(qapp, app_context):
+    """The first diff shown has no remembered position, so it starts at top."""
     widget = _make_widget(app_context)
     widget.diff = MagicMock()
 
-    # First commit: nothing was displayed before, so it is a new diff.
     widget.set_diff_oid('a' * 40)
-    widget.diff.reset_scrollbar.assert_called_once()
-    widget.diff.save_scrollbar.assert_not_called()
-
-    # Switching to a different commit must reset, not preserve, the scroll.
-    widget.diff.reset_scrollbar.reset_mock()
-    widget.set_diff_oid('b' * 40)
-    widget.diff.reset_scrollbar.assert_called_once()
+    # No prior diff, so nothing is saved and the target is the top (None).
+    widget.diff.set_scrollbar_target.assert_called_once_with(None)
     widget.diff.save_scrollbar.assert_not_called()
 
 
@@ -132,22 +126,43 @@ def test_same_commit_rerender_preserves_scrollbar(qapp, app_context):
     # Show a commit, then re-load the identical diff key.
     widget.set_diff_oid('a' * 40)
     widget.diff.save_scrollbar.reset_mock()
-    widget.diff.reset_scrollbar.reset_mock()
+    widget.diff.set_scrollbar_target.reset_mock()
 
     widget.set_diff_oid('a' * 40)
     widget.diff.save_scrollbar.assert_called_once()
-    widget.diff.reset_scrollbar.assert_not_called()
+    widget.diff.set_scrollbar_target.assert_not_called()
 
 
-def test_file_within_commit_resets_scrollbar(qapp, app_context):
-    """Selecting a different file in the same commit is a different diff."""
+def test_switching_commit_remembers_and_restores_position(qapp, app_context):
+    """Each commit's scroll position is remembered and restored on return."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+
+    # Commit A is shown and scrolled to 200.
+    widget.set_diff_oid('a' * 40)
+    widget.diff.scrollbar_value.return_value = 200
+
+    # Switch to B: A's position (200) is captured, B is unseen -> top (None).
+    widget.set_diff_oid('b' * 40)
+    widget.diff.set_scrollbar_target.assert_called_with(None)
+    assert widget._scroll_positions[('a' * 40, None)] == 200
+    widget.diff.scrollbar_value.return_value = 50  # B gets scrolled to 50
+
+    # Back to A: B's position (50) is captured and A's (200) is restored.
+    widget.set_diff_oid('a' * 40)
+    widget.diff.set_scrollbar_target.assert_called_with(200)
+    assert widget._scroll_positions[('b' * 40, None)] == 50
+
+
+def test_file_within_commit_is_separate_position(qapp, app_context):
+    """A different file in the same commit has its own remembered position."""
     widget = _make_widget(app_context)
     widget.diff = MagicMock()
 
     widget.set_diff_oid('a' * 40)
-    widget.diff.reset_scrollbar.reset_mock()
+    widget.diff.scrollbar_value.return_value = 123
 
-    # Same oid, different filename -> different diff key -> reset to top.
+    # Same oid, different filename -> different diff key -> its own (top) target.
     widget.set_diff_oid('a' * 40, filename='some/file.py')
-    widget.diff.reset_scrollbar.assert_called_once()
-    widget.diff.save_scrollbar.assert_not_called()
+    widget.diff.set_scrollbar_target.assert_called_with(None)
+    assert widget._scroll_positions[('a' * 40, None)] == 123
