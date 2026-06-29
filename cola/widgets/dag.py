@@ -1474,6 +1474,12 @@ class GitDAG(standard.MainWindow):
             self.treewidget, self.graphview, self.filewidget
         )
 
+        # Tab / Shift+Tab cycles focus between the commit list and the file
+        # list rather than walking Qt's default focus chain, so the keyboard
+        # stays on the two list panes.
+        self.treewidget.installEventFilter(self)
+        self.filewidget.installEventFilter(self)
+
         self.treewidget.menu_actions = viewer_actions(self.treewidget, self.proxy)
         self.graphview.menu_actions = viewer_actions(self.graphview, self.proxy)
         self.diffwidget_copy_commit = set_icon(
@@ -1660,6 +1666,31 @@ class GitDAG(standard.MainWindow):
     def focus_diff(self):
         """Focus the diff widget"""
         self.diffwidget.setFocus()
+
+    def eventFilter(self, obj, event):
+        """Cycle focus between the commit list and the file list with Tab"""
+        if event.type() == QtCore.QEvent.KeyPress:
+            key = event.key()
+            if key in (Qt.Key_Tab, Qt.Key_Backtab):
+                if obj is self.treewidget:
+                    self.focus_files()
+                else:
+                    self.treewidget.setFocus(Qt.TabFocusReason)
+                return True
+        return super().eventFilter(obj, event)
+
+    def focus_files(self):
+        """Focus the file list, selecting the first file if none is selected"""
+        files = self.filewidget
+        files.setFocus(Qt.TabFocusReason)
+        # Select (not merely make current) the first file so it is highlighted
+        # and arrow keys move from it. setCurrentItem alone only sets the
+        # current index, which leaves the row unhighlighted and makes Down jump
+        # to the second file.
+        if files.topLevelItemCount() and not files.selectedItems():
+            first = files.topLevelItem(0)
+            files.setCurrentItem(first)
+            first.setSelected(True)
 
     def text_changed(self, txt):
         """Respond to changes to the revision input text"""
