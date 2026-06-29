@@ -43,6 +43,13 @@ except ImportError:
     # QtWebEngineWidgets / QtWebKit is not available -- no big deal.
     pass
 
+try:
+    # Setting the process title is optional and enabled when the
+    # "setproctitle" package is installed.
+    import setproctitle
+except ImportError:
+    setproctitle = None
+
 # Import cola modules
 from . import cmd
 from . import cmds
@@ -735,6 +742,17 @@ def startup_message() -> None:
 
 def initialize() -> str:
     """System-level initialization"""
+    # Set the process title so that the launch path (e.g. the path to the
+    # "git-cola" executable) is shown instead of "python" in process listings.
+    # This is an optional feature that depends on the "setproctitle" package
+    # being available.  When the launch path is unhelpful, e.g. when running
+    # via "python -c" or an interactive interpreter, fall back to "git-cola".
+    if setproctitle is not None:
+        title = sys.argv[0] or 'git-cola'
+        if os.path.basename(title).startswith('-'):
+            title = 'git-cola'
+        setproctitle.setproctitle(title)
+
     # We support ~/.config/git-cola/git-bindir on Windows for configuring
     # a custom location for finding the "git" executable.
     git_path = find_git()

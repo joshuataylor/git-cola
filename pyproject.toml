@@ -45,6 +45,8 @@ extras = [
     "pyobjc; sys_platform == 'darwin'",
     # Enables the "Send to Trash" feature.
     "send2trash",
+    # Sets the process title to "git-cola" in process listings.
+    "setproctitle",
 ]
 # Developer tools.
 dev = [
