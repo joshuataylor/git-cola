@@ -94,8 +94,16 @@ class AddToGitIgnore(Dialog):
 
     def resize_widget(self, parent):
         """Set the initial size of the widget"""
-        width, height = qtutils.default_size(parent, 720, 400)
-        self.resize(width, max(400, height // 2))
+        width, _ = qtutils.default_size(parent, 720, 400, use_parent_height=False)
+        self.resize(min(width, 720), self.sizeHint().height())
+
+    def export_state(self):
+        """Do not persist geometry; the dialog is sized to fit its contents"""
+        return {}
+
+    def restore_state(self, settings=None):
+        """Always size to fit the contents rather than restoring saved geometry"""
+        return False
 
     def check_pattern(self):
         self.edit_filename.setDisabled(False)
