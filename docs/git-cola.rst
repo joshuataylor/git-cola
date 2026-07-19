@@ -1010,6 +1010,19 @@ when requesting an icon. Warning: this feature can leak information.
 Network requests to `gravatar.com` are disabled when set to `false`.
 Defaults to `true`.
 
+cola.gravatarcache
+------------------
+
+Cache downloaded gravatar icons on disk so that they are not fetched again
+every time `git cola` starts. Icons are stored under `$XDG_CACHE_HOME/git-cola`,
+which defaults to `~/Library/Caches/git-cola` on macOS and `~/.cache/git-cola`
+elsewhere. Emails that have no gravatar are remembered too, so that they do not
+cost a network request on each startup. Cached icons are refreshed after two
+weeks and emails with no gravatar are checked again daily.
+When set to `false` nothing is written to or read from the cache directory and
+icons are looked up over the network each session.
+Defaults to `true`.
+
 cola.fileattributes
 -------------------
 
