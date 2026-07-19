@@ -333,6 +333,13 @@ class SettingsFormWidget(FormWidget):
             )
         )
 
+        tooltip = N_(
+            'Keep the Git DAG commit list column widths between sessions.\n'
+            'The "Summary" column is normally resized to fit the widest commit\n'
+            'summary, which makes it very wide when a commit has a long summary.'
+        )
+        self.dag_sticky_columns = qtutils.checkbox(checked=False, tooltip=tooltip)
+
         self.editor = QtWidgets.QLineEdit()
         self.editor.setToolTip(N_('The main GUI editor that must block until it exits'))
 
@@ -394,6 +401,7 @@ class SettingsFormWidget(FormWidget):
         self.add_row(N_('Fixup Previous Commit Count'), self.fixup_commit_count)
         self.add_row(N_('Git DAG Maximum Diff Size'), self.dag_max_diff_size)
         self.add_row(N_('Git DAG Diff Command'), self.dag_diff_command)
+        self.add_row(N_('Git DAG Sticky Columns'), self.dag_sticky_columns)
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Detect Conflict Markers'), self.check_conflicts)
@@ -445,6 +453,10 @@ class SettingsFormWidget(FormWidget):
             prefs.DAG_DIFF_COMMAND: (
                 self.dag_diff_command,
                 Defaults.dag_diff_command,
+            ),
+            prefs.DAG_STICKY_COLUMNS: (
+                self.dag_sticky_columns,
+                Defaults.dag_sticky_columns,
             ),
             prefs.SORT_BOOKMARKS: (self.sort_bookmarks, Defaults.sort_bookmarks),
             prefs.DIFFTOOL: (self.difftool, Defaults.difftool),

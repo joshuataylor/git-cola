@@ -27,6 +27,7 @@ COMMENT_CHAR = 'core.commentchar'
 COMMIT_CLEANUP = 'commit.cleanup'
 DAG_DIFF_COMMAND = 'cola.dagdiffcommand'
 DAG_MAX_DIFF_SIZE = 'cola.dagmaxdiffsize'
+DAG_STICKY_COLUMNS = 'cola.dagstickycolumns'
 DICTIONARY = 'cola.dictionary'
 DIFFCONTEXT = 'gui.diffcontext'
 DIFFTOOL = 'diff.tool'
@@ -148,6 +149,7 @@ class Defaults:
     blame_viewer = 'git gui blame'
     dag_diff_command = ''
     dag_max_diff_size = 1024
+    dag_sticky_columns = False
     block_cursor = True
     bold_fonts = False
     bold_headers = False
@@ -416,6 +418,17 @@ def dag_max_diff_size(context) -> int:
     by default so that selecting such a commit stays responsive.
     """
     return context.cfg.get(DAG_MAX_DIFF_SIZE, default=Defaults.dag_max_diff_size)
+
+
+def dag_sticky_columns(context) -> bool:
+    """Keep the Git DAG commit list column widths that were saved last session
+
+    The commit list normally resizes its "Summary" column to fit the widest
+    commit summary once the graph loads, which makes the column very wide when
+    a commit has a long summary. When enabled, saved column widths are used
+    as-is and no automatic resizing is performed.
+    """
+    return context.cfg.get(DAG_STICKY_COLUMNS, default=Defaults.dag_sticky_columns)
 
 
 def load_commitmsg_count(context) -> int:
