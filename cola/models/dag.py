@@ -10,10 +10,18 @@ from ..models import prefs
 
 # put summary at the end b/c it can contain
 # any number of funky characters, including the separator
-LOGFMT = r'format:%H%x01%P%x01%d%x01%an%x01%ad%x01%at%x01%ae%x01%s'
+LOGFMT = r'format:%H%x01%P%x01%d%x01%an%x01%ad%x01%at%x01%ae' r'%x01%cn%x01%cd%x01%ct%x01%ce%x01%s'
 LOGSEP = chr(0x01)
 STAGE = 'STAGE'
 WORKTREE = 'WORKTREE'
+
+
+def _parse_timestamp(value: str) -> int:
+    """Parse a Unix timestamp from git log, tolerating garbage"""
+    try:
+        return int(value)
+    except ValueError:
+        return 0
 
 
 class CommitFactory:
@@ -101,6 +109,10 @@ class Commit:
         'column',
         'context',
         'email',
+        'committer',
+        'commitdate',
+        'committer_timestamp',
+        'committer_email',
         'generation',
         'oid',
         'parents',
@@ -126,6 +138,10 @@ class Commit:
         self.authdate: str | None = None
         self.timestamp: int = 0
         """The author date as a Unix timestamp, for date formatting and filtering"""
+        self.committer: str | None = None
+        self.committer_email: str | None = None
+        self.commitdate: str | None = None
+        self.committer_timestamp: int = 0
         self.parsed = False
         self.generation = CommitFactory.root_generation
         self.column = None
@@ -137,17 +153,30 @@ class Commit:
         oid_len = self.context.model.oid_len
         self.oid = log_entry[:oid_len]
         after_oid = log_entry[oid_len + 1 :]
-        details = after_oid.split(sep, 6)
-        (parents, tags, author, authdate, timestamp, email, summary) = details
+        details = after_oid.split(sep, 10)
+        (
+            parents,
+            tags,
+            author,
+            authdate,
+            timestamp,
+            email,
+            committer,
+            commitdate,
+            committer_timestamp,
+            committer_email,
+            summary,
+        ) = details
 
         self.summary = summary if summary else ''
         self.author = author if author else ''
         self.authdate = authdate if authdate else ''
         self.email = email if email else ''
-        try:
-            self.timestamp = int(timestamp)
-        except ValueError:
-            self.timestamp = 0
+        self.committer = committer if committer else ''
+        self.commitdate = commitdate if commitdate else ''
+        self.committer_email = committer_email if committer_email else ''
+        self.timestamp = _parse_timestamp(timestamp)
+        self.committer_timestamp = _parse_timestamp(committer_timestamp)
 
         if parents:
             generation = None
@@ -366,6 +395,10 @@ class RepoReader:
             stage_commit.email = email
             stage_commit.authdate = authdate
             stage_commit.timestamp = timestamp
+            stage_commit.committer = author
+            stage_commit.committer_email = email
+            stage_commit.commitdate = authdate
+            stage_commit.committer_timestamp = timestamp
             stage_commit.parsed = True
             if parent_commit:
                 parent_commit.children.append(stage_commit)
@@ -383,6 +416,10 @@ class RepoReader:
             worktree_commit.email = email
             worktree_commit.authdate = authdate
             worktree_commit.timestamp = timestamp
+            worktree_commit.committer = author
+            worktree_commit.committer_email = email
+            worktree_commit.commitdate = authdate
+            worktree_commit.committer_timestamp = timestamp
             worktree_commit.parsed = True
             if parent_commit:
                 parent_commit.children.append(worktree_commit)
