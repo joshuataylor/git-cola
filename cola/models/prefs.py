@@ -33,6 +33,7 @@ DIFFTOOL = 'diff.tool'
 DISPLAY_UNTRACKED = 'gui.displayuntracked'
 EDITOR = 'gui.editor'
 ENABLE_GRAVATAR = 'cola.gravatar'
+ENABLE_GRAVATAR_CACHE = 'cola.gravatarcache'
 ENABLE_POPUPS = 'cola.enablepopups'
 EXPANDTAB = 'cola.expandtab'
 FIXUP_COMMIT_COUNT = 'cola.fixupcommitcount'
@@ -159,6 +160,7 @@ class Defaults:
     difftool = 'xxdiff'
     editor = 'gvim'
     enable_gravatar = True
+    enable_gravatar_cache = True
     enable_popups = False
     expandtab = False
     fixup_commit_count = 10
@@ -331,6 +333,13 @@ def commit_cleanup(context) -> str:
 def enable_gravatar(context) -> bool:
     """Is gravatar enabled?"""
     return context.cfg.get(ENABLE_GRAVATAR, default=Defaults.enable_gravatar)
+
+
+def enable_gravatar_cache(context) -> bool:
+    """Are gravatar icons cached on disk between sessions?"""
+    return context.cfg.get(
+        ENABLE_GRAVATAR_CACHE, default=Defaults.enable_gravatar_cache
+    )
 
 
 def default_history_browser() -> str:

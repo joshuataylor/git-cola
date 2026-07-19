@@ -201,6 +201,13 @@ scissors
         tooltip = N_('Use gravatar.com to lookup icons for author emails')
         self.enable_gravatar = qtutils.checkbox(checked=True, tooltip=tooltip)
 
+        tooltip = N_(
+            'Keep downloaded gravatar icons in the cache directory so they are\n'
+            'not fetched again on each startup. Turn this off to look icons up\n'
+            'over the network every session.'
+        )
+        self.enable_gravatar_cache = qtutils.checkbox(checked=True, tooltip=tooltip)
+
         tooltip = N_('Display desktop notifications using popup dialogs')
         self.enable_popups = qtutils.checkbox(checked=False, tooltip=tooltip)
 
@@ -238,6 +245,7 @@ scissors
         self.add_row(N_('Enable Filesystem Monitoring'), self.inotify)
         self.add_row(N_('Filesystem Monitoring Event Delay'), self.inotify_delay)
         self.add_row(N_('Enable Gravatar Icons'), self.enable_gravatar)
+        self.add_row(N_('Cache Gravatar Icons on Disk'), self.enable_gravatar_cache)
         self.add_row(N_('Update Index on Startup'), self.update_index)
         self.add_row(N_('Autocomplete Paths'), self.autocomplete_paths)
         self.add_row(N_('Show Full Paths in the Window Title'), self.show_path)
@@ -269,6 +277,10 @@ scissors
                 Defaults.display_untracked,
             ),
             prefs.ENABLE_GRAVATAR: (self.enable_gravatar, Defaults.enable_gravatar),
+            prefs.ENABLE_GRAVATAR_CACHE: (
+                self.enable_gravatar_cache,
+                Defaults.enable_gravatar_cache,
+            ),
             prefs.ENABLE_POPUPS: (self.enable_popups, Defaults.enable_popups),
             prefs.HTTP_PROXY: (self.http_proxy, Defaults.http_proxy),
             prefs.INOTIFY: (self.inotify, Defaults.inotify),

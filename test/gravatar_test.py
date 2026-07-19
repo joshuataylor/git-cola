@@ -9,6 +9,7 @@ from cola import gravatar
 from cola.compat import ustr
 from cola.gravatar import Gravatar
 from cola.gravatar import GravatarLabel
+from cola.models import prefs
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -96,9 +97,15 @@ class FakeReply:
         self.deleted = True
 
 
-def _make_label(enable_gravatar=True):
+def _make_label(enable_gravatar=True, enable_gravatar_cache=True):
     context = MagicMock()
-    context.cfg.get.return_value = enable_gravatar
+    # Answer per config key so the gravatar and cache settings can be varied
+    # independently, as they are in the preferences dialog.
+    values = {
+        prefs.ENABLE_GRAVATAR: enable_gravatar,
+        prefs.ENABLE_GRAVATAR_CACHE: enable_gravatar_cache,
+    }
+    context.cfg.get.side_effect = lambda key, default=None: values.get(key, default)
     label = GravatarLabel(context)
     # Avoid real network traffic; capture requested URLs instead.
     label.network = MagicMock()
@@ -424,6 +431,49 @@ def test_undecodable_cache_entry_is_refetched(qapp):
     assert not os.path.exists(
         avatarcache.entry_path(email_hash, label.imgsize, avatarcache.AVATAR_SUFFIX)
     )
+
+
+def test_disabled_cache_writes_nothing_to_disk(qapp):
+    """With caching off, resolved avatars and misses are not persisted"""
+    label = _make_label(enable_gravatar_cache=False)
+    alice = 'alice@example.com'
+    nobody = 'noavatar@example.com'
+
+    label.set_email(alice)
+    label.network_finished(_real_avatar_reply(label, alice))
+    label.set_email(nobody)
+    label.network_finished(_missing_avatar_reply(label, nobody))
+
+    # The in-memory cache still works for the current session.
+    assert alice in label.pixmaps
+    assert nobody in label.failed
+    assert not os.path.exists(avatarcache.cache_directory())
+
+
+def test_disabled_cache_ignores_existing_entries(qapp):
+    """With caching off, an avatar already on disk is not used"""
+    email = 'alice@example.com'
+    email_hash = gravatar.sha256_hexdigest(email)
+
+    # Seed the cache as an earlier session with caching enabled would have.
+    warm = _make_label()
+    warm.set_email(email)
+    warm.network_finished(_real_avatar_reply(warm, email))
+    assert avatarcache.load(email_hash, warm.imgsize) is not None
+
+    label = _make_label(enable_gravatar_cache=False)
+    label.set_email(email)
+
+    # The cached avatar is ignored and the network is consulted instead.
+    assert email not in label.pixmaps
+    assert label.network.get.call_count == 1
+
+
+def test_cache_setting_defaults_to_enabled():
+    """Caching is on unless it is explicitly disabled"""
+    context = MagicMock()
+    context.cfg.get.side_effect = lambda key, default=None: default
+    assert prefs.enable_gravatar_cache(context) is True
 
 
 def test_default_pixmap_decoded_once(qapp):
