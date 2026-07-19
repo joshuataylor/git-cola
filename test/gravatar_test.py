@@ -1,12 +1,15 @@
+import os
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
+from cola import avatarcache
 from cola import gravatar
 from cola.compat import ustr
 from cola.gravatar import Gravatar
 from cola.gravatar import GravatarLabel
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
@@ -28,6 +31,17 @@ def test_url_for_email_normalizes_case_and_whitespace():
     """Trimming and lower-casing yield the same URL as the canonical form."""
     canonical = gravatar.Gravatar.url_for_email('email@example.com', 64)
     assert gravatar.Gravatar.url_for_email('  Email@Example.COM  ', 64) == canonical
+
+
+@pytest.fixture(autouse=True)
+def isolated_avatar_cache(tmp_path, monkeypatch):
+    """Keep avatar cache writes out of the developer's real cache directory
+
+    GravatarLabel persists avatars and misses to disk, so without this the
+    suite would write into $XDG_CACHE_HOME and a cached miss from one test
+    would stop a later test from issuing its network request.
+    """
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path))
 
 
 @pytest.fixture(scope='module')
@@ -91,10 +105,22 @@ def _make_label(enable_gravatar=True):
     return label
 
 
+def _png_bytes(size=8):
+    """Return real PNG bytes, which the on-disk cache round-trips and decodes"""
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtGui.QColor('red'))
+    byte_array = QtCore.QByteArray()
+    buf = QtCore.QBuffer(byte_array)
+    buf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+    pixmap.save(buf, 'PNG')
+    buf.close()
+    return bytes(byte_array)
+
+
 def _real_avatar_reply(label, email):
     """A reply that returns an actual avatar (no redirect, so the URLs match)."""
     url = Gravatar.url_for_email(email, label.imgsize)
-    return FakeReply(url, error=0, data=b'\x89PNG real-avatar')
+    return FakeReply(url, error=0, data=_png_bytes())
 
 
 def _missing_avatar_reply(label, email):
@@ -109,6 +135,22 @@ def _missing_avatar_reply(label, email):
         error=0,
         final_url='https://i2.wp.com/git-cola.github.io/images/git-64x64.jpg',
     )
+
+
+def _expire_miss(label, email):
+    """Expire a miss in memory and on disk so the email is retried
+
+    Both windows have to lapse: the in-memory dict is only a fast path, and the
+    on-disk marker outlives it so misses survive a restart.
+    """
+    if email in label.failed:
+        label.failed[email] -= label.RETRY_INTERVAL_SECONDS + 1
+    path = avatarcache.entry_path(
+        gravatar.sha256_hexdigest(email), label.imgsize, avatarcache.MISS_SUFFIX
+    )
+    if os.path.exists(path):
+        stamp = os.path.getmtime(path) - avatarcache.MISS_MAX_AGE_SECONDS - 60
+        os.utime(path, (stamp, stamp))
 
 
 def test_successful_avatar_is_cached(qapp):
@@ -155,7 +197,7 @@ def test_missing_avatar_retried_after_window(qapp):
     assert label.network.get.call_count == 1
 
     # Age the failure beyond the retry window.
-    label.failed[email] -= label.RETRY_INTERVAL_SECONDS + 1
+    _expire_miss(label, email)
     label.set_email(email)
     assert label.network.get.call_count == 2
 
@@ -292,7 +334,7 @@ def test_redirected_reply_is_attributed_to_its_email(qapp):
 
     # Once the retry window lapses the email is requested again, which the
     # stranded entry used to prevent forever.
-    label.failed[email] -= label.RETRY_INTERVAL_SECONDS + 1
+    _expire_miss(label, email)
     label.set_email(email)
     assert label.network.get.call_count == 2
 
@@ -313,6 +355,75 @@ def test_redirected_reply_does_not_cache_default_as_avatar(qapp):
 
     assert email not in label.pixmaps
     assert email in label.failed
+
+
+def test_avatar_is_served_from_disk_without_a_request(qapp):
+    """A label in a later session reuses the cached avatar, hitting no network"""
+    label = _make_label()
+    email = 'alice@example.com'
+    label.set_email(email)
+    label.network_finished(_real_avatar_reply(label, email))
+
+    # A fresh label stands in for a subsequent run of git-cola.
+    fresh = _make_label()
+    fresh.set_email(email)
+
+    assert email in fresh.pixmaps
+    fresh.network.get.assert_not_called()
+
+
+def test_cached_miss_is_served_from_disk_without_a_request(qapp):
+    """A miss recorded on disk suppresses the request in a later session"""
+    label = _make_label()
+    email = 'noavatar@example.com'
+    label.set_email(email)
+    label.network_finished(_missing_avatar_reply(label, email))
+
+    fresh = _make_label()
+    fresh.set_email(email)
+
+    assert email in fresh.failed
+    assert email not in fresh.pixmaps
+    fresh.network.get.assert_not_called()
+
+
+def test_network_error_is_not_cached_as_a_miss(qapp):
+    """Being offline must not persist a miss and hide avatars in later sessions
+
+    Only a redirect proves an email has no avatar. A failed request means the
+    network was unavailable, so the email must be retried next time rather than
+    showing the default icon for a day.
+    """
+    label = _make_label()
+    email = 'alice@example.com'
+    label.set_email(email)
+    # error=1 is any non-zero QNetworkReply error, e.g. host unreachable.
+    label.network_finished(
+        FakeReply(Gravatar.url_for_email(email, label.imgsize), error=1)
+    )
+    assert email in label.failed
+
+    fresh = _make_label()
+    fresh.set_email(email)
+    # Nothing was written to disk, so the fresh label goes to the network.
+    assert fresh.network.get.call_count == 1
+
+
+def test_undecodable_cache_entry_is_refetched(qapp):
+    """A corrupt cache file is discarded and the avatar requested again"""
+    label = _make_label()
+    email = 'alice@example.com'
+    email_hash = gravatar.sha256_hexdigest(email)
+    # Bytes that are not a decodable image, as a truncated write would leave.
+    avatarcache.store_avatar(email_hash, label.imgsize, b'not-an-image')
+
+    label.set_email(email)
+
+    assert email not in label.pixmaps
+    assert label.network.get.call_count == 1
+    assert not os.path.exists(
+        avatarcache.entry_path(email_hash, label.imgsize, avatarcache.AVATAR_SUFFIX)
+    )
 
 
 def test_default_pixmap_decoded_once(qapp):
