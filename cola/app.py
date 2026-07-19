@@ -30,6 +30,7 @@ On a Debian/Ubuntu system you can install these modules using apt:
     )
     sys.exit(1)  # core.EXIT_FAILURE
 
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
@@ -264,6 +265,30 @@ def set_application_name(app_name) -> None:
 
 
 # style note: we use camelCase here since we're masquerading a Qt class
+# Qt warnings that are noise rather than actionable, matched as substrings.
+#
+# Qt keeps finished HTTPS connections in a keep-alive pool. When the pool times
+# out while the application sits idle, Qt's own HTTP layer reads the socket it
+# just closed and prints this warning. It is emitted entirely inside Qt --
+# reproducible with a bare QNetworkAccessManager and no git-cola code -- and
+# nothing on our side can prevent it: the reply is already destroyed with
+# deleteLater(), and sending "Connection: close" does not stop Qt pooling.
+# Users see it after an avatar loads in the diff view and the window goes idle.
+SUPPRESSED_QT_MESSAGES = ('QIODevice::read (QSslSocket): device not open',)
+
+
+def message_handler(_mode: Any, _context: Any, message: str) -> None:
+    """Forward Qt log messages to stderr, minus the known-noise entries"""
+    if any(noise in message for noise in SUPPRESSED_QT_MESSAGES):
+        return
+    core.print_stderr(message)
+
+
+def install_message_handler() -> None:
+    """Filter known-harmless Qt warnings out of the application's stderr"""
+    QtCore.qInstallMessageHandler(message_handler)
+
+
 class ColaApplication:
     """The main cola application
 
@@ -279,6 +304,7 @@ class ColaApplication:
         gui_theme: None = None,
     ) -> None:
         set_application_name(context.app_name)
+        install_message_handler()
         cfgactions.install()
         i18n.install(locale)
         qtcompat.install()
