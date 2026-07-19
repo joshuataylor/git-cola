@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from . import core
+from . import utils
 
 if TYPE_CHECKING:
     from .types import TextType
@@ -173,6 +174,28 @@ def xdg_config_home(*args) -> str:
         'XDG_CONFIG_HOME', os.path.join(core.expanduser('~'), '.config')
     )
     return os.path.join(config, *args)
+
+
+def xdg_cache_home(*args) -> str:
+    """Return the XDG_CACHE_HOME cache directory, e.g. ~/.cache
+
+    $XDG_CACHE_HOME is honoured on every platform when it is set. Otherwise
+    macOS uses its native ~/Library/Caches and everything else uses ~/.cache.
+    """
+    home = core.expanduser('~')
+    if utils.is_darwin():
+        default = os.path.join(home, 'Library', 'Caches')
+    else:
+        default = os.path.join(home, '.cache')
+    # An empty $XDG_CACHE_HOME is treated as unset rather than as a relative
+    # path, which would scatter cache directories into the current directory.
+    cache = core.getenv('XDG_CACHE_HOME', '') or default
+    return os.path.join(cache, *args)
+
+
+def cache_home(*args) -> str:
+    """Return git-cola's cache directory, e.g. ~/.cache/git-cola"""
+    return xdg_cache_home('git-cola', *args)
 
 
 def xdg_data_home(*args) -> TextType:
