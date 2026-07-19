@@ -123,6 +123,8 @@ class GravatarLabel(QtWidgets.QLabel):
         Returns True when the cache answered and the label has been updated,
         so no network request is needed.
         """
+        if not prefs.enable_gravatar_cache(self.context):
+            return False
         entry = avatarcache.load(sha256_hexdigest(email), self.imgsize)
         if entry is None:
             return False
@@ -209,9 +211,10 @@ class GravatarLabel(QtWidgets.QLabel):
             if email is not None:
                 self.pixmaps[email] = pixmap
                 self.failed.pop(email, None)
-                avatarcache.store_avatar(
-                    sha256_hexdigest(email), self.imgsize, response
-                )
+                if prefs.enable_gravatar_cache(self.context):
+                    avatarcache.store_avatar(
+                        sha256_hexdigest(email), self.imgsize, response
+                    )
         else:
             # No avatar exists for this email (relocated to the default, or the
             # request errored). Record the miss so the default icon is reused
@@ -223,7 +226,7 @@ class GravatarLabel(QtWidgets.QLabel):
                 # request means the network was unavailable, which must not be
                 # written to disk: doing so would keep showing the default icon
                 # in later sessions for authors who do have an avatar.
-                if relocated:
+                if relocated and prefs.enable_gravatar_cache(self.context):
                     avatarcache.store_miss(sha256_hexdigest(email), self.imgsize)
 
         # Only repaint if this reply is for the email that is currently meant
