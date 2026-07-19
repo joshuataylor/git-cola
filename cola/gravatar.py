@@ -10,6 +10,7 @@ from qtpy import QtNetwork
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from . import avatarcache
 from . import core
 from . import icons
 from . import qtutils
@@ -104,6 +105,10 @@ class GravatarLabel(QtWidgets.QLabel):
                 return
             # The retry window has elapsed; allow another attempt.
             del self.failed[email]
+        # Fall back to the on-disk cache before going to the network, so
+        # avatars resolved in a previous session appear immediately.
+        if self.load_from_cache(email):
+            return
         # Show the default icon while the avatar is fetched. This must repaint
         # even when an avatar is already displayed: the email has changed to an
         # author we have not resolved yet, so continuing to show the previous
@@ -111,6 +116,38 @@ class GravatarLabel(QtWidgets.QLabel):
         # network_finished() swaps in the real avatar once the reply arrives.
         self.set_pixmap_from_default()
         self.request(email)
+
+    def load_from_cache(self, email: str) -> bool:
+        """Resolve an email from the on-disk cache
+
+        Returns True when the cache answered and the label has been updated,
+        so no network request is needed.
+        """
+        entry = avatarcache.load(sha256_hexdigest(email), self.imgsize)
+        if entry is None:
+            return False
+        outcome, data = entry
+        if outcome == avatarcache.AVATAR:
+            pixmap = self._scale_to_imgsize(self.pixmap_from_bytes(data))
+            # A cache file that no longer decodes (truncated, or written by a
+            # different Qt image plugin set) is discarded and re-fetched.
+            if pixmap.isNull():
+                avatarcache.remove(
+                    avatarcache.entry_path(
+                        sha256_hexdigest(email),
+                        self.imgsize,
+                        avatarcache.AVATAR_SUFFIX,
+                    )
+                )
+                return False
+            self.pixmaps[email] = pixmap
+            self.setPixmap(pixmap)
+            return True
+        # A cached miss: show the default icon and record the failure in
+        # memory so the retry window is honoured for the rest of the session.
+        self.failed[email] = int(time.time())
+        self.set_pixmap_from_default()
+        return True
 
     def request(self, email) -> None:
         if prefs.enable_gravatar(self.context):
@@ -172,6 +209,9 @@ class GravatarLabel(QtWidgets.QLabel):
             if email is not None:
                 self.pixmaps[email] = pixmap
                 self.failed.pop(email, None)
+                avatarcache.store_avatar(
+                    sha256_hexdigest(email), self.imgsize, response
+                )
         else:
             # No avatar exists for this email (relocated to the default, or the
             # request errored). Record the miss so the default icon is reused
@@ -179,6 +219,12 @@ class GravatarLabel(QtWidgets.QLabel):
             pixmap = self.default_pixmap()
             if email is not None:
                 self.failed[email] = int(time.time())
+                # Only a relocation proves the email has no avatar. A failed
+                # request means the network was unavailable, which must not be
+                # written to disk: doing so would keep showing the default icon
+                # in later sessions for authors who do have an avatar.
+                if relocated:
+                    avatarcache.store_miss(sha256_hexdigest(email), self.imgsize)
 
         # Only repaint if this reply is for the email that is currently meant
         # to be displayed. A late reply for a previous author must not clobber
@@ -186,11 +232,9 @@ class GravatarLabel(QtWidgets.QLabel):
         if email is not None and email == self.email:
             self.setPixmap(pixmap)
 
-        # Schedule reply destruction on the next event-loop tick. Without this,
-        # Qt eventually tears the SSL socket down while the QNetworkReply is
-        # still attached, producing a "QIODevice::read (QSslSocket): device
-        # not open" warning. Qt docs explicitly say not to delete the reply
-        # inside the finished slot -- use deleteLater() instead.
+        # Schedule reply destruction on the next event-loop tick. Qt docs
+        # explicitly say not to delete the reply inside the finished slot --
+        # use deleteLater() instead.
         # https://doc.qt.io/qt-6/qnetworkaccessmanager.html#finished
         reply.deleteLater()
 
