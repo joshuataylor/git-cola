@@ -34,13 +34,13 @@ def qapp():
 
 
 LOG_TEXT = """
-23e7eab4ba2c94e3155f5d261c693ccac1342eb9^Af4fb8fd5baaa55d9b41faca79be289bb4407281e^A^ADavid Aguilar^AThu Dec 6 18:59:20 2007 -0800^A1196996360^Adavvid@gmail.com^AMerged diffdisplay into main
-f4fb8fd5baaa55d9b41faca79be289bb4407281e^Ae3f5a2d0248de6197d6e0e63c901810b8a9af2f8^A^ADavid Aguilar^ATue Dec 4 03:14:56 2007 -0800^A1196766896^Adavvid@gmail.com^ASquashed commit of the following:
-e3f5a2d0248de6197d6e0e63c901810b8a9af2f8^Afa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A^ADavid Aguilar^AMon Dec 3 02:36:06 2007 -0800^A1196678166^Adavvid@gmail.com^AMerged qlistwidgets into main.
-103766573cd4e6799d3ee792bcd632b92cf7c6c0^Afa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A^ADavid Aguilar^ATue Dec 11 05:13:21 2007 -0800^A1197378801^Adavvid@gmail.com^AAdded TODO
-fa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A1ba04ad185cf9f04c56c8482e9a73ef1bd35c695^A^ADavid Aguilar^AFri Nov 30 05:19:05 2007 -0800^A1196428745^Adavvid@gmail.com^AAvoid multiple signoffs
-1ba04ad185cf9f04c56c8482e9a73ef1bd35c695^Aad454b189fe5785af397fd6067cf103268b6626e^A^ADavid Aguilar^AFri Nov 30 05:07:47 2007 -0800^A1196428067^Adavvid@gmail.com^Aupdated model/view/controller api
-ad454b189fe5785af397fd6067cf103268b6626e^A^A (tag: refs/tags/v0.0)^ADavid Aguilar^AFri Nov 30 00:03:28 2007 -0800^A1196409808^Adavvid@gmail.com^Afirst cut of ugit
+23e7eab4ba2c94e3155f5d261c693ccac1342eb9^Af4fb8fd5baaa55d9b41faca79be289bb4407281e^A^ADavid Aguilar^AThu Dec 6 18:59:20 2007 -0800^A1196996360^Adavvid@gmail.com^ADavid Aguilar^AThu Dec 6 18:59:20 2007 -0800^A1196996360^Adavvid@gmail.com^AMerged diffdisplay into main
+f4fb8fd5baaa55d9b41faca79be289bb4407281e^Ae3f5a2d0248de6197d6e0e63c901810b8a9af2f8^A^ADavid Aguilar^ATue Dec 4 03:14:56 2007 -0800^A1196766896^Adavvid@gmail.com^ADavid Aguilar^ATue Dec 4 03:14:56 2007 -0800^A1196766896^Adavvid@gmail.com^ASquashed commit of the following:
+e3f5a2d0248de6197d6e0e63c901810b8a9af2f8^Afa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A^ADavid Aguilar^AMon Dec 3 02:36:06 2007 -0800^A1196678166^Adavvid@gmail.com^ADavid Aguilar^AMon Dec 3 02:36:06 2007 -0800^A1196678166^Adavvid@gmail.com^AMerged qlistwidgets into main.
+103766573cd4e6799d3ee792bcd632b92cf7c6c0^Afa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A^ADavid Aguilar^ATue Dec 11 05:13:21 2007 -0800^A1197378801^Adavvid@gmail.com^ADavid Aguilar^ATue Dec 11 05:13:21 2007 -0800^A1197378801^Adavvid@gmail.com^AAdded TODO
+fa5ad6c38be603e2ffd1f9b722a3a5c675f63de2^A1ba04ad185cf9f04c56c8482e9a73ef1bd35c695^A^ADavid Aguilar^AFri Nov 30 05:19:05 2007 -0800^A1196428745^Adavvid@gmail.com^ADavid Aguilar^AFri Nov 30 05:19:05 2007 -0800^A1196428745^Adavvid@gmail.com^AAvoid multiple signoffs
+1ba04ad185cf9f04c56c8482e9a73ef1bd35c695^Aad454b189fe5785af397fd6067cf103268b6626e^A^ADavid Aguilar^AFri Nov 30 05:07:47 2007 -0800^A1196428067^Adavvid@gmail.com^ADavid Aguilar^AFri Nov 30 05:07:47 2007 -0800^A1196428067^Adavvid@gmail.com^Aupdated model/view/controller api
+ad454b189fe5785af397fd6067cf103268b6626e^A^A (tag: refs/tags/v0.0)^ADavid Aguilar^AFri Nov 30 00:03:28 2007 -0800^A1196409808^Adavvid@gmail.com^ADavid Aguilar^AFri Nov 30 00:03:28 2007 -0800^A1196409808^Adavvid@gmail.com^Afirst cut of ugit
 """.strip().replace(
     '^A', chr(0x01)
 )
@@ -333,3 +333,98 @@ def test_tab_keeps_existing_file_selection(qapp, app_context):
 
     # The existing selection is preserved, not reset to the first file.
     assert files.selectedItems() == [second]
+
+
+def _commit_for_columns(app_context):
+    """Build a commit with every field the column getters read"""
+    commit = dag.Commit(app_context, oid='ad454b189fe5785af397fd6067cf103268b6626e')
+    commit.summary = 'first cut of ugit'
+    commit.author = 'David Aguilar'
+    commit.email = 'davvid@gmail.com'
+    commit.authdate = 'Fri Nov 30 00:03:28 2007 -0800'
+    commit.timestamp = 1196409808
+    commit.committer = 'Josh Taylor'
+    commit.committer_email = 'joshuataylorx@gmail.com'
+    commit.commitdate = 'Fri Nov 30 00:04:00 2007 -0800'
+    commit.committer_timestamp = 1196409840
+    commit.tags = ['tags/v0.0']
+    commit.parsed = True
+    return commit
+
+
+def test_default_columns(qapp, app_context):
+    """Only the summary, author and date columns are shown by default"""
+    tree = CommitTreeWidget(app_context, None)
+    visible = [column.key for _, column in tree.visible_columns()]
+    assert visible == ['summary', 'author', 'date']
+
+
+def test_toggling_a_column_fills_in_its_text(qapp, app_context):
+    """Revealing a column populates it for commits that are already displayed"""
+    tree = CommitTreeWidget(app_context, None)
+    tree.add_commits([_commit_for_columns(app_context)])
+    item = tree.topLevelItem(0)
+
+    oid_idx = [idx for idx, column in enumerate(tree.columns) if column.key == 'oid'][0]
+    assert tree.isColumnHidden(oid_idx)
+    assert item.text(oid_idx) == ''
+
+    tree.set_column_visible(oid_idx, True)
+
+    assert not tree.isColumnHidden(oid_idx)
+    assert item.text(oid_idx) == 'ad454b189fe5'
+    assert tree.columnWidth(oid_idx) > 0
+
+
+def test_committer_columns(qapp, app_context):
+    """The committer columns read the committer fields, not the author ones"""
+    tree = CommitTreeWidget(app_context, None)
+    indexes = {column.key: idx for idx, column in enumerate(tree.columns)}
+    for key in ('committer', 'committer_email', 'refs'):
+        tree.set_column_visible(indexes[key], True)
+    tree.add_commits([_commit_for_columns(app_context)])
+    item = tree.topLevelItem(0)
+
+    assert item.text(indexes['committer']) == 'Josh Taylor'
+    assert item.text(indexes['committer_email']) == 'joshuataylorx@gmail.com'
+    assert item.text(indexes['refs']) == 'tags/v0.0'
+    assert item.text(indexes['author']) == 'David Aguilar'
+
+
+def test_required_columns_cannot_be_hidden(qapp, app_context):
+    """The summary column holds the inline graph and must stay visible"""
+    tree = CommitTreeWidget(app_context, None)
+    state = {'column_visibility': {'summary': False, 'author': False}}
+    tree.apply_state(state)
+
+    indexes = {column.key: idx for idx, column in enumerate(tree.columns)}
+    assert not tree.isColumnHidden(indexes['summary'])
+    assert tree.isColumnHidden(indexes['author'])
+
+
+def test_column_state_round_trip(qapp, app_context):
+    """Column visibility and order survive an export/apply cycle"""
+    tree = CommitTreeWidget(app_context, None)
+    indexes = {column.key: idx for idx, column in enumerate(tree.columns)}
+    tree.set_column_visible(indexes['oid'], True)
+    tree.set_column_visible(indexes['author'], False)
+    tree.header().moveSection(tree.header().visualIndex(indexes['date']), 1)
+
+    state = tree.export_state()
+
+    restored = CommitTreeWidget(app_context, None)
+    restored.apply_state(state)
+
+    assert not restored.isColumnHidden(indexes['oid'])
+    assert restored.isColumnHidden(indexes['author'])
+    assert restored.column_order() == state['column_order']
+
+
+def test_apply_state_without_column_keys(qapp, app_context):
+    """State saved by older versions only carries column widths"""
+    tree = CommitTreeWidget(app_context, None)
+    tree.apply_state({'column_widths': [100, 200, 300]})
+
+    visible = [column.key for _, column in tree.visible_columns()]
+    assert visible == ['summary', 'author', 'date']
+    assert tree.columnWidth(0) == 100
