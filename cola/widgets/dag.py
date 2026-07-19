@@ -1,5 +1,6 @@
 from __future__ import annotations
 import collections
+import datetime
 import enum
 import itertools
 import math
@@ -13,6 +14,7 @@ from qtpy.QtCore import Signal
 
 from .. import cmds
 from .. import core
+from .. import dates
 from .. import difftool
 from .. import gitcmds
 from .. import guicmds
@@ -1119,6 +1121,30 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
             self.set_hover(None, -1)
 
 
+def date_formatter(context):
+    """Return a function that renders a commit's author date for display
+
+    The preferences and the current time are read once so that formatting a
+    large number of commits does not repeat the same lookups per row.
+    """
+    mode = prefs.dag_date_mode(context)
+    custom_format = prefs.dag_date_format(context)
+    pretty = prefs.dag_date_pretty(context)
+    now = datetime.datetime.now()
+
+    def format_date(commit):
+        return dates.format_timestamp(
+            commit.timestamp,
+            mode,
+            custom_format,
+            pretty,
+            git_date=commit.authdate or '',
+            now=now,
+        )
+
+    return format_date
+
+
 class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
     """Custom TreeWidgetItem used in to build the commit tree widget"""
 
@@ -1126,12 +1152,12 @@ class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
     AUTHOR = 1
     DATE = 2
 
-    def __init__(self, commit, parent=None):
+    def __init__(self, commit, parent=None, date_text=None):
         QtWidgets.QTreeWidgetItem.__init__(self, parent)
         self.commit = commit
         self.setText(self.SUMMARY, commit.summary)
         self.setText(self.AUTHOR, commit.author)
-        self.setText(self.DATE, commit.authdate)
+        self.setText(self.DATE, commit.authdate if date_text is None else date_text)
 
 
 class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
@@ -1306,8 +1332,9 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         items = []
         head = 'HEAD'
         head_oid = None
+        format_date = date_formatter(self.context)
         for commit in reversed(commits):
-            item = CommitTreeWidgetItem(commit)
+            item = CommitTreeWidgetItem(commit, date_text=format_date(commit))
             items.append(item)
             self.oidmap[commit.oid] = item
             for tag in commit.tags:

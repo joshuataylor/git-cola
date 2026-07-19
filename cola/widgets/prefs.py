@@ -2,6 +2,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from .. import cmds
+from .. import dates
 from .. import hidpi
 from .. import icons
 from .. import qtutils
@@ -333,6 +334,37 @@ class SettingsFormWidget(FormWidget):
             )
         )
 
+        self.dag_date_mode = qtutils.combo_mapped([
+            (N_('Git ("Log Date Format" setting)'), dates.DateMode.GIT),
+            (N_('System locale'), dates.DateMode.SYSTEM),
+            (N_('Custom format'), dates.DateMode.CUSTOM),
+        ])
+        self.dag_date_mode.setToolTip(
+            N_(
+                'How dates are displayed in the Git DAG commit list.\n'
+                '"Git" uses the string produced by git log --date=<format>,\n'
+                '"System locale" uses the short format configured for your system\n'
+                'and "Custom format" uses the format below.'
+            )
+        )
+
+        self.dag_date_format = QtWidgets.QLineEdit()
+        self.dag_date_format.setToolTip(
+            N_(
+                'The date format used when "Git DAG Date Format" is set to\n'
+                '"Custom format", e.g. "dd MMM yyyy hh:mm" or "yyyy-MM-dd HH:mm".\n'
+                'd/M/y are the day, month and year, h/H are 12- and 24-hour hours,\n'
+                'm is minutes and s is seconds. Repeat a letter to pad or expand it.'
+            )
+        )
+
+        tooltip = N_(
+            'Replace recent dates in the Git DAG commit list with "Today",\n'
+            '"Yesterday" and "10 minutes ago". Older commits keep the date\n'
+            'format configured above.'
+        )
+        self.dag_date_pretty = qtutils.checkbox(checked=False, tooltip=tooltip)
+
         tooltip = N_(
             'Keep the Git DAG commit list column widths between sessions.\n'
             'The "Summary" column is normally resized to fit the widest commit\n'
@@ -402,6 +434,9 @@ class SettingsFormWidget(FormWidget):
         self.add_row(N_('Git DAG Maximum Diff Size'), self.dag_max_diff_size)
         self.add_row(N_('Git DAG Diff Command'), self.dag_diff_command)
         self.add_row(N_('Git DAG Sticky Columns'), self.dag_sticky_columns)
+        self.add_row(N_('Git DAG Date Format'), self.dag_date_mode)
+        self.add_row(N_('Git DAG Custom Date Format'), self.dag_date_format)
+        self.add_row(N_('Git DAG Pretty Dates'), self.dag_date_pretty)
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Detect Conflict Markers'), self.check_conflicts)
@@ -458,6 +493,9 @@ class SettingsFormWidget(FormWidget):
                 self.dag_sticky_columns,
                 Defaults.dag_sticky_columns,
             ),
+            prefs.DAG_DATE_MODE: (self.dag_date_mode, Defaults.dag_date_mode),
+            prefs.DAG_DATE_FORMAT: (self.dag_date_format, Defaults.dag_date_format),
+            prefs.DAG_DATE_PRETTY: (self.dag_date_pretty, Defaults.dag_date_pretty),
             prefs.SORT_BOOKMARKS: (self.sort_bookmarks, Defaults.sort_bookmarks),
             prefs.DIFFTOOL: (self.difftool, Defaults.difftool),
             prefs.EDITOR: (self.editor, fallback_editor()),
