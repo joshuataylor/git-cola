@@ -9,6 +9,8 @@ from .. import core
 from .. import hidpi
 from .. import utils
 from ..cmd import Command
+from ..dates import DateMode
+from ..dates import date_modes
 
 ABBREV = 'core.abbrev'
 ASPELL_ENABLED = 'cola.aspell.enabled'
@@ -25,6 +27,9 @@ CHECK_CONFLICTS = 'cola.checkconflicts'
 CHECK_PUBLISHED_COMMITS = 'cola.checkpublishedcommits'
 COMMENT_CHAR = 'core.commentchar'
 COMMIT_CLEANUP = 'commit.cleanup'
+DAG_DATE_FORMAT = 'cola.dagdateformat'
+DAG_DATE_MODE = 'cola.dagdatemode'
+DAG_DATE_PRETTY = 'cola.dagdatepretty'
 DAG_DIFF_COMMAND = 'cola.dagdiffcommand'
 DAG_MAX_DIFF_SIZE = 'cola.dagmaxdiffsize'
 DAG_STICKY_COLUMNS = 'cola.dagstickycolumns'
@@ -151,6 +156,9 @@ class Defaults:
     autodetect_proxy = True
     background_editor = ''
     blame_viewer = 'git gui blame'
+    dag_date_format = 'dd MMM yyyy hh:mm'
+    dag_date_mode = DateMode.GIT
+    dag_date_pretty = False
     dag_diff_command = ''
     dag_max_diff_size = 1024
     dag_sticky_columns = False
@@ -459,6 +467,28 @@ def dag_max_diff_size(context) -> int:
     by default so that selecting such a commit stays responsive.
     """
     return context.cfg.get(DAG_MAX_DIFF_SIZE, default=Defaults.dag_max_diff_size)
+
+
+def dag_date_mode(context) -> str:
+    """How commit dates are rendered in the Git DAG commit list
+
+    "git" uses the string produced by "git log --date=<cola.logdate>", "system"
+    uses the system locale's short format and "custom" uses cola.dagdateformat.
+    """
+    value = context.cfg.get(DAG_DATE_MODE, default=Defaults.dag_date_mode)
+    if value not in date_modes():
+        value = Defaults.dag_date_mode
+    return value
+
+
+def dag_date_format(context) -> str:
+    """The Qt date format string used when cola.dagdatemode is "custom" """
+    return context.cfg.get(DAG_DATE_FORMAT, default=Defaults.dag_date_format)
+
+
+def dag_date_pretty(context) -> bool:
+    """Replace recent commit dates with "Today", "Yesterday" and "10 minutes ago" """
+    return context.cfg.get(DAG_DATE_PRETTY, default=Defaults.dag_date_pretty)
 
 
 def dag_sticky_columns(context) -> bool:
