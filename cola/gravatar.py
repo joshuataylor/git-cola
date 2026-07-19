@@ -146,15 +146,20 @@ class GravatarLabel(QtWidgets.QLabel):
         # self.email, which may have advanced to a newer selection while this
         # request was in flight. Without this, a slow reply could be attributed
         # to (and cached under) the wrong author.
-        url = reply.url().toString()
+        # Use the *original* request URL, not reply.url(). Qt follows redirects
+        # itself, so on a cache miss reply.url() is the final hop (Gravatar
+        # redirects to the "d=" default image on a different host) and would
+        # never match the key stored by request(). That left the email
+        # unidentified and its entry stranded in self.requested forever, so the
+        # avatar was never cached and never re-requested.
+        url = reply.request().url().toString()
         email = self.requested.pop(url, None)
 
-        location = qtutils.network_reply_header(reply, 'Location')
-        if location and email is not None:
-            request_location = Gravatar.url_for_email(email, self.imgsize)
-            relocated = location != request_location
-        else:
-            relocated = False
+        # A redirect means Gravatar had no avatar and served the "d=" default
+        # image instead. Detect it by comparing the final URL against the one we
+        # asked for: after Qt follows the redirect the reply is a plain 200 with
+        # no Location header, so the header is always empty and cannot be used.
+        relocated = reply.url().toString() != url
         no_error = qtutils.enum_value(QtNetwork.QNetworkReply.NetworkError.NoError)
         reply_error = qtutils.enum_value(reply.error())
 
