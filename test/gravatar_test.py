@@ -41,26 +41,39 @@ def qapp():
     yield instance
 
 
-class FakeReply:
-    """Minimal stand-in for QNetworkReply used to drive network_finished."""
+def _url_mock(url):
+    mock = MagicMock()
+    mock.toString.return_value = url
+    return mock
 
-    def __init__(self, url, *, error=0, location='', data=b'avatar-bytes'):
+
+class FakeReply:
+    """Minimal stand-in for QNetworkReply used to drive network_finished.
+
+    Qt follows redirects itself, so a reply exposes two URLs: request().url()
+    is what we asked for and url() is the final hop. They differ only when
+    Gravatar had no avatar and redirected to the "d=" default image. The
+    redirect is never visible as a Location header -- the reply we are handed
+    is the plain 200 from the end of the chain.
+    """
+
+    def __init__(self, url, *, error=0, final_url=None, data=b'avatar-bytes'):
         self._url = url
+        self._final_url = final_url if final_url is not None else url
         self._error = error
-        self._location = location
         self._data = data
         self.deleted = False
 
     def url(self):
+        return _url_mock(self._final_url)
+
+    def request(self):
         mock = MagicMock()
-        mock.toString.return_value = self._url
+        mock.url.return_value = _url_mock(self._url)
         return mock
 
     def error(self):
         return self._error
-
-    def rawHeader(self, _name):
-        return self._location.encode('utf-8')
 
     def readAll(self):
         return self._data
@@ -79,15 +92,23 @@ def _make_label(enable_gravatar=True):
 
 
 def _real_avatar_reply(label, email):
-    """A reply that returns an actual avatar (no Location redirect)."""
+    """A reply that returns an actual avatar (no redirect, so the URLs match)."""
     url = Gravatar.url_for_email(email, label.imgsize)
-    return FakeReply(url, error=0, location='', data=b'\x89PNG real-avatar')
+    return FakeReply(url, error=0, data=b'\x89PNG real-avatar')
 
 
 def _missing_avatar_reply(label, email):
-    """A reply redirected to the default image (no avatar for this email)."""
+    """A reply redirected to the default image (no avatar for this email).
+
+    Gravatar redirects to the "d=" default, which lives on another host, so the
+    final URL differs from the one that was requested.
+    """
     url = Gravatar.url_for_email(email, label.imgsize)
-    return FakeReply(url, error=0, location='https://example.com/default.png')
+    return FakeReply(
+        url,
+        error=0,
+        final_url='https://i2.wp.com/git-cola.github.io/images/git-64x64.jpg',
+    )
 
 
 def test_successful_avatar_is_cached(qapp):
@@ -243,6 +264,55 @@ def test_revisiting_cached_miss_shows_default_not_stale_avatar(qapp):
     # bob's miss is cached, so no new request and the default is shown.
     assert label.network.get.call_count == 2
     assert painted[-1] is label.default_pixmap()
+
+
+def test_redirected_reply_is_attributed_to_its_email(qapp):
+    """A redirected miss is matched to its email via the original request URL.
+
+    Regression: network_finished() keyed off reply.url(), which after Qt
+    follows the redirect is the default image on another host. It never matched
+    the pending entry, so the email was left unidentified: the miss was not
+    recorded and the stranded entry in self.requested made request() treat the
+    email as permanently in flight, so it was never fetched again.
+    """
+    label = _make_label()
+    email = 'noavatar@example.com'
+
+    label.set_email(email)
+    assert label.network.get.call_count == 1
+    assert label.requested  # the request is pending
+
+    label.network_finished(_missing_avatar_reply(label, email))
+
+    # The reply was attributed despite the redirect: the miss is recorded and
+    # nothing is left pending.
+    assert email in label.failed
+    assert email not in label.pixmaps
+    assert not label.requested
+
+    # Once the retry window lapses the email is requested again, which the
+    # stranded entry used to prevent forever.
+    label.failed[email] -= label.RETRY_INTERVAL_SECONDS + 1
+    label.set_email(email)
+    assert label.network.get.call_count == 2
+
+
+def test_redirected_reply_does_not_cache_default_as_avatar(qapp):
+    """The default image served on a miss is never cached as the real avatar.
+
+    Regression: relocation was detected via the Location header, which is
+    always empty because Qt has already followed the redirect. Every miss
+    therefore looked like a success and cached the git-cola default image as
+    that author's avatar, permanently.
+    """
+    label = _make_label()
+    email = 'noavatar@example.com'
+
+    label.set_email(email)
+    label.network_finished(_missing_avatar_reply(label, email))
+
+    assert email not in label.pixmaps
+    assert email in label.failed
 
 
 def test_default_pixmap_decoded_once(qapp):
