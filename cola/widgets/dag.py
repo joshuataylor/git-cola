@@ -1132,17 +1132,112 @@ def date_formatter(context):
     pretty = prefs.dag_date_pretty(context)
     now = datetime.datetime.now()
 
-    def format_date(commit):
+    def format_date(timestamp, git_date):
         return dates.format_timestamp(
-            commit.timestamp,
+            timestamp,
             mode,
             custom_format,
             pretty,
-            git_date=commit.authdate or '',
+            git_date=git_date or '',
             now=now,
         )
 
     return format_date
+
+
+class CommitColumn:
+    """A column in the commit list
+
+    ``getter`` is called with a commit and the renderer that holds the
+    pre-computed display preferences, and returns the cell's text.
+    """
+
+    def __init__(self, key, label, getter, visible=False, required=False, width=0):
+        self.key = key
+        self.label = label
+        self.getter = getter
+        self.visible = visible
+        self.required = required
+        """Required columns cannot be hidden"""
+        self.width = width
+        """The width used the first time the column is revealed"""
+
+
+class CommitRenderer:
+    """Display preferences shared by every cell in a single refresh"""
+
+    def __init__(self, context):
+        self.format_date = date_formatter(context)
+        self.abbrev = prefs.abbrev(context)
+
+
+def commit_columns():
+    """Return the commit list columns in their default order
+
+    The summary must stay first: the inline graph delegate and the graph row
+    data are both attached to the first column.
+    """
+    return [
+        CommitColumn(
+            'summary',
+            N_('Summary'),
+            lambda commit, renderer: commit.summary,
+            visible=True,
+            required=True,
+        ),
+        CommitColumn(
+            'author',
+            N_('Author'),
+            lambda commit, renderer: commit.author,
+            visible=True,
+        ),
+        CommitColumn(
+            'date',
+            N_('Date, Time'),
+            lambda commit, renderer: renderer.format_date(
+                commit.timestamp, commit.authdate
+            ),
+            visible=True,
+        ),
+        CommitColumn(
+            'oid',
+            N_('Hash'),
+            lambda commit, renderer: commit.oid[: renderer.abbrev],
+            width=defs.scale(96),
+        ),
+        CommitColumn(
+            'refs',
+            N_('Refs'),
+            lambda commit, renderer: ' '.join(commit.tags),
+            width=defs.scale(160),
+        ),
+        CommitColumn(
+            'email',
+            N_('Author Email'),
+            lambda commit, renderer: commit.email,
+            width=defs.scale(200),
+        ),
+        CommitColumn(
+            'committer',
+            N_('Committer'),
+            lambda commit, renderer: commit.committer,
+            width=defs.scale(140),
+        ),
+        CommitColumn(
+            'committer_email',
+            N_('Committer Email'),
+            lambda commit, renderer: commit.committer_email,
+            width=defs.scale(200),
+        ),
+        CommitColumn(
+            'commitdate',
+            N_('Commit Date, Time'),
+            lambda commit, renderer: renderer.format_date(
+                commit.committer_timestamp, commit.commitdate
+            ),
+            width=defs.scale(160),
+        ),
+    ]
 
 
 class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
@@ -1152,12 +1247,16 @@ class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
     AUTHOR = 1
     DATE = 2
 
-    def __init__(self, commit, parent=None, date_text=None):
+    def __init__(self, commit, columns, renderer, parent=None):
+        """Populate the (index, column) pairs in ``columns`` for ``commit``
+
+        Hidden columns are not passed in; their text is filled in later if the
+        user reveals them, which keeps refreshes cheap on large histories.
+        """
         QtWidgets.QTreeWidgetItem.__init__(self, parent)
         self.commit = commit
-        self.setText(self.SUMMARY, commit.summary)
-        self.setText(self.AUTHOR, commit.author)
-        self.setText(self.DATE, commit.authdate if date_text is None else date_text)
+        for idx, column in columns:
+            self.setText(idx, column.getter(commit, renderer) or '')
 
 
 class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
@@ -1178,10 +1277,18 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         # instead of calling the delegate's sizeHint() for every commit, which
         # is a large saving on big histories.
         self.setUniformRowHeights(True)
-        self.setHeaderLabels([N_('Summary'), N_('Author'), N_('Date, Time')])
-        self.header().setSectionResizeMode(
-            CommitTreeWidgetItem.DATE, QtWidgets.QHeaderView.Stretch
-        )
+
+        self.columns = commit_columns()
+        self.setHeaderLabels([column.label for column in self.columns])
+        header = self.header()
+        # The last visible section stretches so that the columns always fill the
+        # view, whichever columns the user has chosen to display.
+        header.setStretchLastSection(True)
+        header.setSectionsMovable(True)
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(self.show_header_menu)
+        for idx, column in enumerate(self.columns):
+            self.setColumnHidden(idx, not column.visible)
 
         self.graph_delegate = GraphDelegate(self)
         self.context = context
@@ -1209,24 +1316,95 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             self.selection_changed, type=Qt.QueuedConnection
         )
 
+    def visible_columns(self):
+        """Return the (index, column) pairs for the columns being displayed"""
+        return [
+            (idx, column)
+            for idx, column in enumerate(self.columns)
+            if not self.isColumnHidden(idx)
+        ]
+
+    def show_header_menu(self, point):
+        """Present the column visibility menu when the header is right-clicked"""
+        menu = QtWidgets.QMenu(self)
+        menu.setTitle(N_('Columns'))
+        for idx, column in enumerate(self.columns):
+            action = menu.addAction(column.label)
+            action.setCheckable(True)
+            action.setChecked(not self.isColumnHidden(idx))
+            action.setEnabled(not column.required)
+            action.toggled.connect(partial(self.set_column_visible, idx))
+        menu.exec_(self.header().mapToGlobal(point))
+
+    def set_column_visible(self, idx, visible):
+        """Show or hide a column, filling in its text the first time it is shown"""
+        if visible == (not self.isColumnHidden(idx)):
+            return
+        column = self.columns[idx]
+        if visible:
+            renderer = CommitRenderer(self.context)
+            for item_idx in range(self.topLevelItemCount()):
+                item = self.topLevelItem(item_idx)
+                if item is not None:
+                    item.setText(idx, column.getter(item.commit, renderer) or '')
+        self.setColumnHidden(idx, not visible)
+        # A column that has never been displayed has no width of its own.
+        if visible and column.width and self.columnWidth(idx) == 0:
+            self.setColumnWidth(idx, column.width)
+
+    def column_order(self):
+        """Return the column keys in the order they are displayed"""
+        header = self.header()
+        order = sorted(
+            range(len(self.columns)), key=lambda idx: header.visualIndex(idx)
+        )
+        return [self.columns[idx].key for idx in order]
+
+    def set_column_order(self, keys):
+        """Restore the display order of the columns"""
+        header = self.header()
+        indexes = {column.key: idx for idx, column in enumerate(self.columns)}
+        for visual_index, key in enumerate(keys):
+            idx = indexes.get(key)
+            if idx is None:
+                continue
+            current = header.visualIndex(idx)
+            if current != -1 and current != visual_index:
+                header.moveSection(current, visual_index)
+
     def export_state(self):
         """Export the widget's state"""
         # The base class method is intentionally overridden because we only
         # care about the details below for this sub-widget.
         state = {}
         state['column_widths'] = self.column_widths()
+        state['column_visibility'] = {
+            column.key: not self.isColumnHidden(idx)
+            for idx, column in enumerate(self.columns)
+        }
+        state['column_order'] = self.column_order()
         return state
 
     def apply_state(self, state):
         """Apply the exported widget state"""
+        visibility = state.get('column_visibility') or {}
+        for idx, column in enumerate(self.columns):
+            if column.required:
+                continue
+            visible = visibility.get(column.key)
+            if visible is not None:
+                self.setColumnHidden(idx, not visible)
+        column_order = state.get('column_order')
+        if column_order:
+            self.set_column_order(column_order)
+
         try:
             column_widths = state['column_widths']
         except (KeyError, ValueError):
             column_widths = None
         if column_widths:
-            # We only care about the first two columns. This allows the final
-            # column to stretch and shrink.
-            self.set_column_widths(column_widths[:2])
+            # The last visible section stretches, so Qt overrides its width.
+            self.set_column_widths(column_widths)
             if prefs.dag_sticky_columns(self.context):
                 # Sticky columns keep the saved widths verbatim; skip the
                 # resize-to-contents pass that runs once the graph is loaded.
@@ -1332,9 +1510,10 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         items = []
         head = 'HEAD'
         head_oid = None
-        format_date = date_formatter(self.context)
+        renderer = CommitRenderer(self.context)
+        columns = self.visible_columns()
         for commit in reversed(commits):
-            item = CommitTreeWidgetItem(commit, date_text=format_date(commit))
+            item = CommitTreeWidgetItem(commit, columns, renderer)
             items.append(item)
             self.oidmap[commit.oid] = item
             for tag in commit.tags:
