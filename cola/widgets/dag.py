@@ -1201,7 +1201,12 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             # We only care about the first two columns. This allows the final
             # column to stretch and shrink.
             self.set_column_widths(column_widths[:2])
-            self._column_init_state = ColumnInitState.SHOW_EVENT
+            if prefs.dag_sticky_columns(self.context):
+                # Sticky columns keep the saved widths verbatim; skip the
+                # resize-to-contents pass that runs once the graph is loaded.
+                self._column_init_state = ColumnInitState.COMPLETE
+            else:
+                self._column_init_state = ColumnInitState.SHOW_EVENT
         return True
 
     # Qt overrides
@@ -1344,7 +1349,8 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         # Resize column to fit content after graph data is loaded.
         if self._column_init_state < ColumnInitState.GRAPH:
             self._column_init_state = ColumnInitState.GRAPH
-            self.resizeColumnToContents(CommitTreeWidgetItem.SUMMARY)
+            if not prefs.dag_sticky_columns(self.context):
+                self.resizeColumnToContents(CommitTreeWidgetItem.SUMMARY)
 
     def create_patch(self):
         """Export a patch from the selected items"""
