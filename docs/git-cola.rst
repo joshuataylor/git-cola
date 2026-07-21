@@ -929,6 +929,44 @@ Inspect unmerged files for conflict markers before staging them.
 This feature helps prevent accidental staging of unresolved merge conflicts.
 Defaults to `true`.
 
+cola.daggithubverification
+--------------------------
+
+Additionally ask GitHub whether commit signatures are verified, reporting the
+same `Verified` state that the GitHub web interface shows. This makes network
+requests for repositories hosted on GitHub and requires
+`cola.dagshowsignatures` to be enabled. Defaults to `false`.
+
+GitHub validates signatures against the keys its users have registered, whereas
+Git validates against your local keyring, so the two verdicts can legitimately
+differ. Both are shown in the commit's tooltip.
+
+Tokens are resolved from the following sources, and the first one found wins:
+
+1. The `GITHUB_TOKEN` and `GH_TOKEN` environment variables.
+2. `cola.githubauthcommand`, when one is configured.
+3. The `gh` command-line tool, unless `cola.githubusegh` is disabled.
+
+A token is never read from or written to the Git configuration, so one cannot
+end up committed inside a repository.
+
+With a token, every commit is verified in a single batched request. Without
+one, the unauthenticated GitHub rate limit of 60 requests per hour applies and
+each commit costs a request, so only a small number of commits is queried.
+
+cola.dagshowsignatures
+----------------------
+
+Verify GPG and SSH commit signatures and report their status in the `Signature`
+column of the `Git DAG` commit list. Right-click the commit list header to
+reveal the column.
+
+Verification costs roughly one GPG or SSH invocation per signed commit, so it
+is kept out of the log that populates the graph and performed in the
+background instead. The commit list appears immediately and the `Signature`
+column fills in shortly afterwards, starting with the commits on screen and
+following the view as it is scrolled. Defaults to `false`.
+
 cola.defaultrepo
 ----------------
 
@@ -1000,6 +1038,44 @@ Expand tabs into spaces in the commit message editor.  When set to `true`,
 `git cola` will insert a configurable number of spaces when tab is pressed.
 The number of spaces is determined by `cola.tabwidth`.
 Defaults to `false`.
+
+cola.githubauthcommand
+----------------------
+
+A shell command that prints a GitHub API token on its standard output. This
+lets the token come from a password manager or a short-lived credential helper
+instead of an environment variable::
+
+    git config --global cola.githubauthcommand "gh auth token"
+    git config --global cola.githubauthcommand "op read 'op://Private/GitHub/credential'"
+
+The command runs through a shell, so quoting and pipes behave the way they do
+in a terminal. Only the first non-empty line of the output is used as the
+token. The hostname being authenticated against is exported to the command as
+`COLA_CREDENTIAL_HOST`, and `COLA_CREDENTIAL_PROVIDER` is set to `github`,
+which lets a single command serve `github.com` and GitHub Enterprise hosts.
+
+This is consulted after the `GITHUB_TOKEN` and `GH_TOKEN` environment
+variables and before the `gh` command-line tool. If the command fails, the
+remaining sources are still tried and the failure is reported in the `Console`
+tool. Unset by default.
+
+cola.githubhost
+---------------
+
+The hostname used to detect GitHub remotes when `cola.daggithubverification`
+is enabled. Set this to a GitHub Enterprise hostname to verify signatures
+against a self-hosted instance. Defaults to `github.com`.
+
+cola.githubusegh
+----------------
+
+Read GitHub API tokens from the `gh` command-line tool. The `hosts.yml` config
+file is read first, followed by `gh auth token`, which also works when `gh`
+keeps its token in a system keyring rather than on disk.
+
+Set this to `false` to stop `git cola` from using your `gh` login, for example
+when its token is scoped too narrowly. Defaults to `true`.
 
 cola.gravatar
 -------------
