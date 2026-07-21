@@ -423,6 +423,21 @@ def select_all() -> QtGui.QIcon:
     return from_theme('edit-select-all', fallback='edit-select-all')
 
 
+def signature_good() -> QtGui.QIcon:
+    """A commit whose signature was verified"""
+    return icon('signature-good.svg')
+
+
+def signature_bad() -> QtGui.QIcon:
+    """A commit whose signature is invalid"""
+    return icon('signature-bad.svg')
+
+
+def signature_unknown() -> QtGui.QIcon:
+    """A commit whose signature could not be validated"""
+    return icon('signature-unknown.svg')
+
+
 def staged() -> QtGui.QIcon:
     """Staged icon"""
     return icon('staged.svg')
