@@ -1,22 +1,6 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   xmlns:dc="http://purl.org/dc/elements/1.1/"
-   xmlns:cc="http://creativecommons.org/ns#"
-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-   xmlns:svg="http://www.w3.org/2000/svg"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   width="8.2617321mm"
-   height="6.2944207mm"
-   viewBox="0 0 29.273854 22.303065"
-   id="svg2"
-   version="1.1"
-   inkscape:version="0.91 r13725"
-   sodipodi:docname="last-first-order.svg">
-  <defs
+<svg width="22" height="22" version="1.1" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+<g transform="matrix(0.683204,0,0,0.683204,1,3.38123)">
+<defs
      id="defs4" />
   <sodipodi:namedview
      id="base"
@@ -118,4 +102,5 @@
        inkscape:connector-curvature="0"
        sodipodi:nodetypes="cc" />
   </g>
+</g>
 </svg>
