@@ -31,7 +31,9 @@ DAG_DATE_FORMAT = 'cola.dagdateformat'
 DAG_DATE_MODE = 'cola.dagdatemode'
 DAG_DATE_PRETTY = 'cola.dagdatepretty'
 DAG_DIFF_COMMAND = 'cola.dagdiffcommand'
+DAG_GITHUB_VERIFICATION = 'cola.daggithubverification'
 DAG_MAX_DIFF_SIZE = 'cola.dagmaxdiffsize'
+DAG_SHOW_SIGNATURES = 'cola.dagshowsignatures'
 DAG_STICKY_COLUMNS = 'cola.dagstickycolumns'
 DICTIONARY = 'cola.dictionary'
 DIFFCONTEXT = 'gui.diffcontext'
@@ -45,6 +47,9 @@ EXPANDTAB = 'cola.expandtab'
 FIXUP_COMMIT_COUNT = 'cola.fixupcommitcount'
 FONTDIFF = 'cola.fontdiff'
 FONTSIZE = 'cola.fontsize'
+GITHUB_AUTH_COMMAND = 'cola.githubauthcommand'
+GITHUB_HOST = 'cola.githubhost'
+GITHUB_USE_GH = 'cola.githubusegh'
 HIDPI = 'cola.hidpi'
 HISTORY_BROWSER = 'gui.historybrowser'
 HTTP_PROXY = 'http.proxy'
@@ -156,7 +161,9 @@ class Defaults:
     dag_date_mode = DateMode.GIT
     dag_date_pretty = False
     dag_diff_command = ''
+    dag_github_verification = False
     dag_max_diff_size = 1024
+    dag_show_signatures = False
     dag_sticky_columns = False
     block_cursor = True
     bold_fonts = False
@@ -174,6 +181,9 @@ class Defaults:
     enable_popups = False
     expandtab = False
     fixup_commit_count = 10
+    github_auth_command = ''
+    github_host = 'github.com'
+    github_use_gh = True
     history_browser = 'gitk'
     http_proxy = ''
     icon_theme = 'default'
@@ -459,6 +469,56 @@ def dag_sticky_columns(context) -> bool:
     as-is and no automatic resizing is performed.
     """
     return context.cfg.get(DAG_STICKY_COLUMNS, default=Defaults.dag_sticky_columns)
+
+
+def dag_show_signatures(context) -> bool:
+    """Verify commit signatures and display their status in the Git DAG
+
+    Asking "git log" for the signature status makes it verify every signed
+    commit, which is noticeably slower on large histories, so this is off by
+    default. Covers both GPG and SSH signatures.
+    """
+    return context.cfg.get(DAG_SHOW_SIGNATURES, default=Defaults.dag_show_signatures)
+
+
+def dag_github_verification(context) -> bool:
+    """Ask GitHub whether commit signatures are verified
+
+    This makes network requests to the GitHub API for repositories hosted on
+    GitHub and reports the same "Verified" state that the GitHub web interface
+    shows. Requires cola.dagshowsignatures to be enabled.
+    """
+    return context.cfg.get(
+        DAG_GITHUB_VERIFICATION, default=Defaults.dag_github_verification
+    )
+
+
+def github_host(context) -> str:
+    """The GitHub hostname used to detect GitHub remotes
+
+    Set this to a GitHub Enterprise hostname to enable signature verification
+    against a self-hosted instance.
+    """
+    return context.cfg.get(GITHUB_HOST, default=Defaults.github_host)
+
+
+def github_auth_command(context) -> str:
+    """A shell command that prints a GitHub API token on stdout
+
+    This allows a token to come from a password manager or a short-lived
+    credential helper, e.g. "gh auth token" or
+    "op read 'op://Private/GitHub/credential'". Empty means no command.
+    """
+    return context.cfg.get(GITHUB_AUTH_COMMAND, default=Defaults.github_auth_command)
+
+
+def github_use_gh(context) -> bool:
+    """Read GitHub API tokens from the "gh" command-line tool
+
+    Disable this to keep git-cola from using your "gh" login, e.g. when its
+    token is scoped too narrowly. Enabled by default.
+    """
+    return context.cfg.get(GITHUB_USE_GH, default=Defaults.github_use_gh)
 
 
 def load_commitmsg_count(context) -> int:

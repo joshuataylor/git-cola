@@ -372,6 +372,41 @@ class SettingsFormWidget(FormWidget):
         )
         self.dag_sticky_columns = qtutils.checkbox(checked=False, tooltip=tooltip)
 
+        tooltip = N_(
+            'Verify GPG and SSH commit signatures and report their status in the\n'
+            '"Signature" column of the Git DAG commit list.\n'
+            'This makes Git verify every signed commit, which slows down\n'
+            'refreshes noticeably on large histories.'
+        )
+        self.dag_show_signatures = qtutils.checkbox(checked=False, tooltip=tooltip)
+
+        tooltip = N_(
+            'Additionally ask GitHub whether commit signatures are verified,\n'
+            'matching the "Verified" badge shown by the GitHub web interface.\n'
+            'This makes network requests for repositories hosted on GitHub and\n'
+            'requires "Show Commit Signatures" to be enabled.'
+        )
+        self.dag_github_verification = qtutils.checkbox(checked=False, tooltip=tooltip)
+
+        self.github_auth_command = QtWidgets.QLineEdit()
+        self.github_auth_command.setToolTip(
+            N_(
+                'A shell command that prints a GitHub API token, used when the\n'
+                'GITHUB_TOKEN and GH_TOKEN environment variables are unset.\n'
+                'For example "gh auth token" or\n'
+                '"op read \'op://Private/GitHub/credential\'".\n'
+                'The hostname is available to the command as'
+                ' COLA_CREDENTIAL_HOST.'
+            )
+        )
+
+        tooltip = N_(
+            'Read GitHub API tokens from the "gh" command-line tool.\n'
+            'Disable this to stop git-cola from using your "gh" login, for\n'
+            'example when its token is scoped too narrowly.'
+        )
+        self.github_use_gh = qtutils.checkbox(checked=True, tooltip=tooltip)
+
         self.editor = QtWidgets.QLineEdit()
         self.editor.setToolTip(N_('The main GUI editor that must block until it exits'))
 
@@ -437,6 +472,10 @@ class SettingsFormWidget(FormWidget):
         self.add_row(N_('Git DAG Date Format'), self.dag_date_mode)
         self.add_row(N_('Git DAG Custom Date Format'), self.dag_date_format)
         self.add_row(N_('Git DAG Pretty Dates'), self.dag_date_pretty)
+        self.add_row(N_('Show Commit Signatures'), self.dag_show_signatures)
+        self.add_row(N_('Verify Signatures with GitHub'), self.dag_github_verification)
+        self.add_row(N_('GitHub Auth Command'), self.github_auth_command)
+        self.add_row(N_('Use the GitHub CLI for Authentication'), self.github_use_gh)
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Detect Conflict Markers'), self.check_conflicts)
@@ -496,6 +535,19 @@ class SettingsFormWidget(FormWidget):
             prefs.DAG_DATE_MODE: (self.dag_date_mode, Defaults.dag_date_mode),
             prefs.DAG_DATE_FORMAT: (self.dag_date_format, Defaults.dag_date_format),
             prefs.DAG_DATE_PRETTY: (self.dag_date_pretty, Defaults.dag_date_pretty),
+            prefs.DAG_SHOW_SIGNATURES: (
+                self.dag_show_signatures,
+                Defaults.dag_show_signatures,
+            ),
+            prefs.DAG_GITHUB_VERIFICATION: (
+                self.dag_github_verification,
+                Defaults.dag_github_verification,
+            ),
+            prefs.GITHUB_AUTH_COMMAND: (
+                self.github_auth_command,
+                Defaults.github_auth_command,
+            ),
+            prefs.GITHUB_USE_GH: (self.github_use_gh, Defaults.github_use_gh),
             prefs.SORT_BOOKMARKS: (self.sort_bookmarks, Defaults.sort_bookmarks),
             prefs.DIFFTOOL: (self.difftool, Defaults.difftool),
             prefs.EDITOR: (self.editor, fallback_editor()),
