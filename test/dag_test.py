@@ -46,6 +46,9 @@ ad454b189fe5785af397fd6067cf103268b6626e^A^A (tag: refs/tags/v0.0)^ADavid Aguila
 )
 LOG_LINES = LOG_TEXT.split('\n')
 
+SIGNER = 'David Aguilar <davvid@gmail.com>'
+SIGNING_KEY = 'ABCDEF0123456789'
+
 
 class DAGTestData:
     """Test data provided by the dag_context fixture"""
@@ -140,6 +143,185 @@ def test_repo_reader_contract(core, dag_context):
 
     assert 'log.abbrevCommit=false' in call_args[0][0]
     assert 'log.showSignature=false' in call_args[0][0]
+
+
+@patch('cola.models.dag.core')
+def test_repo_reader_never_verifies_signatures(core, dag_context):
+    """Signature verification is kept out of the log that populates the DAG
+
+    The %G? placeholders make "git log" verify every signed commit before it
+    emits anything, which would hold up the whole graph.
+    """
+    commit_files()
+    dag_context.context.model.update_status()
+    core.run_command.return_value = (0, LOG_TEXT, '')
+    commits = list(dag_context.reader.get())
+
+    assert commits
+    assert '%G?' not in ' '.join(dag_context.reader._cmd)
+    for commit in commits:
+        assert commit.signature == ''
+        assert dag.signature_severity(commit) == dag.SignatureStatus.NONE
+        assert dag.signature_tooltip(commit) == ''
+
+
+@patch('cola.models.dag.core')
+def test_read_signatures(core, app_context):
+    """Signatures are read separately, keyed by oid"""
+    oids = ['a' * 40, 'b' * 40]
+    sep = chr(0x01)
+    core.run_command.return_value = (
+        0,
+        f'{oids[0]}{sep}G{sep}{SIGNER}{sep}{SIGNING_KEY}\n'
+        f'{oids[1]}{sep}B{sep}{sep}',
+        '',
+    )
+
+    signatures = dag.read_signatures(app_context, oids)
+
+    assert signatures[oids[0]] == ('G', SIGNER, SIGNING_KEY)
+    assert signatures[oids[1]] == ('B', '', '')
+
+    cmd = core.run_command.call_args[0][0]
+    assert '%G?' in ' '.join(cmd)
+    # --no-walk keeps the output to the commits asked for.
+    assert '--no-walk=unsorted' in cmd
+    assert cmd[-2:] == oids
+
+
+@patch('cola.models.dag.core')
+def test_read_signatures_drops_pseudo_commits(core, app_context):
+    """STAGE and WORKTREE must never reach "git log"
+
+    They are not revisions, and a single unknown argument makes the command
+    fail, which would lose the signatures of every real commit in the batch.
+    """
+    oid = 'a' * 40
+    sep = chr(0x01)
+    core.run_command.return_value = (
+        0,
+        f'{oid}{sep}G{sep}{SIGNER}{sep}{SIGNING_KEY}',
+        '',
+    )
+
+    signatures = dag.read_signatures(app_context, [dag.STAGE, oid, dag.WORKTREE])
+
+    cmd = core.run_command.call_args[0][0]
+    assert dag.STAGE not in cmd
+    assert dag.WORKTREE not in cmd
+    assert signatures == {oid: ('G', SIGNER, SIGNING_KEY)}
+
+
+def test_read_signatures_with_only_pseudo_commits(app_context):
+    """A batch of nothing but placeholders runs no command at all"""
+    with patch('cola.models.dag.core') as core:
+        assert dag.read_signatures(app_context, [dag.STAGE, dag.WORKTREE]) == {}
+    core.run_command.assert_not_called()
+
+
+def test_read_signatures_task_skips_work_when_stopping(app_context):
+    """A batch queued when the window closes is abandoned, not run
+
+    The application waits for the thread pool to drain before exiting, so
+    running it anyway would hold up quitting.
+    """
+    from cola.widgets.dag import read_signatures_task
+
+    oids = ['a' * 40]
+    with patch('cola.models.dag.core') as core:
+        result = read_signatures_task(app_context, oids, lambda: True)
+
+    assert result == (oids, {})
+    core.run_command.assert_not_called()
+
+
+def test_read_signatures_without_oids(app_context):
+    """No commits means no subprocess at all"""
+    with patch('cola.models.dag.core') as core:
+        assert dag.read_signatures(app_context, []) == {}
+    core.run_command.assert_not_called()
+
+
+@patch('cola.models.dag.core')
+def test_read_signatures_when_git_fails(core, app_context):
+    """A failed verification pass yields nothing rather than raising"""
+    core.run_command.return_value = (128, '', 'fatal: bad object')
+    assert dag.read_signatures(app_context, ['a' * 40]) == {}
+
+
+@patch('cola.models.dag.core')
+def test_read_signatures_ignores_malformed_lines(core, app_context):
+    """Unexpected output is skipped instead of breaking the batch"""
+    oid = 'a' * 40
+    sep = chr(0x01)
+    core.run_command.return_value = (
+        0,
+        f'garbage\n{oid}{sep}G{sep}{SIGNER}{sep}{SIGNING_KEY}\n\n',
+        '',
+    )
+
+    signatures = dag.read_signatures(app_context, [oid])
+
+    assert signatures == {oid: ('G', SIGNER, SIGNING_KEY)}
+
+
+@pytest.mark.parametrize(
+    ('status', 'severity'),
+    [
+        ('G', dag.SignatureStatus.GOOD),
+        ('U', dag.SignatureStatus.UNKNOWN),
+        ('E', dag.SignatureStatus.UNKNOWN),
+        ('B', dag.SignatureStatus.BAD),
+        ('R', dag.SignatureStatus.BAD),
+        ('N', dag.SignatureStatus.NONE),
+        ('', dag.SignatureStatus.NONE),
+    ],
+)
+def test_signature_severity_mapping(app_context, status, severity):
+    """Every status character git can emit maps onto a severity"""
+    commit = dag.Commit(app_context, oid='a' * 40)
+    commit.signature = status
+    assert dag.signature_severity(commit) == severity
+
+
+def test_signature_tooltip_reports_both_verdicts(app_context):
+    """Local and GitHub verdicts are both shown, even when they disagree"""
+    commit = dag.Commit(app_context, oid='a' * 40)
+    commit.signature = 'U'
+    commit.signer = 'Josh Taylor <josh@example.com>'
+    commit.signing_key = 'CCDD0A75B2820EA9'
+    commit.github_verification = {'verified': True, 'reason': 'valid'}
+
+    tooltip = dag.signature_tooltip(commit)
+
+    assert 'Good signature with unknown validity' in tooltip
+    assert 'Josh Taylor <josh@example.com>' in tooltip
+    assert 'CCDD0A75B2820EA9' in tooltip
+    assert 'Verified by GitHub' in tooltip
+
+
+def test_signature_tooltip_unverified_by_github(app_context):
+    """GitHub's reason is reported when it refuses to verify a signature"""
+    commit = dag.Commit(app_context, oid='a' * 40)
+    commit.signature = 'G'
+    commit.github_verification = {'verified': False, 'reason': 'unknown_key'}
+
+    tooltip = dag.signature_tooltip(commit)
+
+    assert 'Good signature' in tooltip
+    assert 'unknown_key' in tooltip
+
+
+def test_signature_label(app_context):
+    """Each signature status character maps onto a label"""
+    commit = dag.Commit(app_context, oid='a' * 40)
+    assert dag.signature_label(commit) == ''
+
+    commit.signature = 'G'
+    assert dag.signature_label(commit) == 'Verified'
+
+    commit.signature = 'N'
+    assert dag.signature_label(commit) == ''
 
 
 def test_prepare_labels_single_remote_no_condensing():

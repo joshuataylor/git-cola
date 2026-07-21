@@ -10,6 +10,16 @@ Usability, bells and whistles
   (`#1617 <https://github.com/git-cola/git-cola/pull/1617>`_)
   (`#1645 <https://github.com/git-cola/git-cola/pull/1645>`_)
 
+* Git DAG can now display the GPG and SSH signature status of each commit in a
+  new "Signature" column, and in the graph view's tooltips. Enable it using the
+  "Show Commit Signatures" option in Preferences. Verification runs in the
+  background, starting with the commits on screen, so the graph is displayed
+  without waiting for it. Signatures can additionally be verified against
+  GitHub, which reports the same "Verified" state as the GitHub web interface.
+  API tokens come from the `GITHUB_TOKEN` and `GH_TOKEN` environment variables,
+  a configurable `cola.githubauthcommand` shell command, or the `gh`
+  command-line tool.
+
 * The dialog that appears when reverting worktree edits now includes a diff
   preview of the content that will be reverted.
   (`#1621 <https://github.com/git-cola/git-cola/pull/1621>`_)
