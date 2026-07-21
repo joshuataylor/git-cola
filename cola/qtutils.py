@@ -1171,9 +1171,23 @@ class DebouncingMenu(QtWidgets.QMenu):
             QtWidgets.QMenu.mouseReleaseEvent(self, event)
 
 
-def add_menu(title: str, parent: Any) -> DebouncingMenu:
-    """Create a menu and set its title."""
+def add_menu(
+    title: str, parent: Any, icon: QtGui.QIcon | None = None
+) -> DebouncingMenu:
+    """Create a menu and set its title, optionally giving it an icon.
+
+    macOS enables AA_DontShowIconsInMenus, so a submenu's icon is hidden unless
+    setIconVisibleInMenu() opts back in. Without it the icon silently vanishes
+    and the label loses its icon-column indent, leaving it out of line with the
+    surrounding items.
+
+    """
     menu = create_menu(title, parent)
+    if icon is not None:
+        menu_action = menu.menuAction()
+        menu_action.setIcon(icon)
+        if hasattr(menu_action, 'setIconVisibleInMenu'):
+            menu_action.setIconVisibleInMenu(True)
     if hasattr(parent, 'addMenu'):
         parent.addMenu(menu)
     else:
