@@ -17,6 +17,7 @@ from .. import core
 from .. import dates
 from .. import difftool
 from .. import gitcmds
+from .. import github
 from .. import guicmds
 from .. import hotkeys
 from .. import icons
@@ -25,6 +26,7 @@ from .. import qtutils
 from .. import utils
 from ..compat import maxsize
 from ..i18n import N_
+from ..interaction import Interaction
 from ..models import dag
 from ..models import main
 from ..models import prefs
@@ -714,6 +716,13 @@ GRAPH_ROW_ROLE = Qt.UserRole + 1
 GRAPH_PREV_ROW_ROLE = Qt.UserRole + 2
 COMMIT_ROLE = Qt.UserRole + 3
 
+SIGNATURE_BATCH_SIZE = 64
+"""Number of commits verified per background signature pass
+
+Small enough that the rows on screen fill in promptly, large enough that a
+long history does not turn into hundreds of "git log" invocations.
+"""
+
 _REMOTES_PREFIX = 'remotes/'
 _TAGS_PREFIX = 'tags/'
 _HEADS_PREFIX = 'heads/'
@@ -1155,17 +1164,41 @@ class CommitColumn:
 
     ``getter`` is called with a commit and the renderer that holds the
     pre-computed display preferences, and returns the cell's text.
+    ``icon_getter`` and ``tooltip_getter`` are optional and follow the same
+    calling convention.
     """
 
-    def __init__(self, key, label, getter, visible=False, required=False, width=0):
+    def __init__(
+        self,
+        key,
+        label,
+        getter,
+        icon_getter=None,
+        tooltip_getter=None,
+        visible=False,
+        required=False,
+        width=0,
+    ):
         self.key = key
         self.label = label
         self.getter = getter
+        self.icon_getter = icon_getter
+        self.tooltip_getter = tooltip_getter
         self.visible = visible
         self.required = required
         """Required columns cannot be hidden"""
         self.width = width
         """The width used the first time the column is revealed"""
+
+    def render(self, item, idx, commit, renderer):
+        """Populate the cell at ``idx`` for ``commit``"""
+        item.setText(idx, self.getter(commit, renderer) or '')
+        if self.icon_getter is not None:
+            icon = self.icon_getter(commit, renderer)
+            if icon is not None:
+                item.setIcon(idx, icon)
+        if self.tooltip_getter is not None:
+            item.setToolTip(idx, self.tooltip_getter(commit, renderer) or '')
 
 
 class CommitRenderer:
@@ -1174,6 +1207,57 @@ class CommitRenderer:
     def __init__(self, context):
         self.format_date = date_formatter(context)
         self.abbrev = prefs.abbrev(context)
+        self.show_signatures = prefs.dag_show_signatures(context)
+
+
+def signature_icon(commit, renderer):
+    """Return the icon for a commit's signature status, or None when unsigned"""
+    severity = dag.signature_severity(commit)
+    if severity == dag.SignatureStatus.GOOD:
+        return icons.signature_good()
+    if severity == dag.SignatureStatus.BAD:
+        return icons.signature_bad()
+    if severity == dag.SignatureStatus.UNKNOWN:
+        return icons.signature_unknown()
+    return None
+
+
+def signature_tooltip(commit, renderer):
+    """Return the tooltip for a commit's signature status"""
+    if not renderer.show_signatures:
+        return N_('Enable "Show Commit Signatures" in Preferences to verify signatures')
+    tooltip = dag.signature_tooltip(commit)
+    if not tooltip:
+        return N_('Unsigned')
+    return tooltip
+
+
+def verify_commits_with_github(context, owner, name, oids, should_stop):
+    """Return (oids, verifications, error) for the specified commits
+
+    The requested oids come back alongside the results so that the caller can
+    tell which commits GitHub had no answer for. This runs in a background
+    thread and must never raise, otherwise the failure is lost with the worker.
+    """
+    try:
+        verifications = github.verify_commits(
+            context, owner, name, oids, should_stop=should_stop
+        )
+        return (oids, verifications, None)
+    except github.GitHubError as error:
+        return (oids, {}, error)
+
+
+def read_signatures_task(context, oids, should_stop):
+    """Return (oids, signatures) for the specified commits
+
+    The requested oids are echoed back so that commits Git had no answer for,
+    e.g. the STAGE and WORKTREE placeholders, can be marked as done rather
+    than being asked about forever.
+    """
+    if should_stop():
+        return (oids, {})
+    return (oids, dag.read_signatures(context, oids))
 
 
 def commit_columns():
@@ -1242,6 +1326,14 @@ def commit_columns():
             ),
             width=defs.scale(160),
         ),
+        CommitColumn(
+            'signature',
+            N_('Signature'),
+            lambda commit, renderer: dag.signature_label(commit),
+            icon_getter=signature_icon,
+            tooltip_getter=signature_tooltip,
+            width=defs.scale(140),
+        ),
     ]
 
 
@@ -1261,7 +1353,7 @@ class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
         QtWidgets.QTreeWidgetItem.__init__(self, parent)
         self.commit = commit
         for idx, column in columns:
-            self.setText(idx, column.getter(commit, renderer) or '')
+            column.render(self, idx, commit, renderer)
 
 
 class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
@@ -1329,6 +1421,40 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             if not self.isColumnHidden(idx)
         ]
 
+    def visible_oids(self):
+        """Return the oids of the commits currently scrolled into view"""
+        viewport = self.viewport().rect()
+        item = self.itemAt(viewport.topLeft())
+        oids = []
+        while item is not None:
+            if not self.visualItemRect(item).intersects(viewport):
+                break
+            oids.append(item.commit.oid)
+            item = self.itemBelow(item)
+        return oids
+
+    def column_index(self, key):
+        """Return the index of the column with the specified key"""
+        for idx, column in enumerate(self.columns):
+            if column.key == key:
+                return idx
+        return None
+
+    def update_signatures(self, oids):
+        """Re-render the signature cells for the specified commits
+
+        Used when GitHub verification arrives after the commits were displayed.
+        """
+        idx = self.column_index('signature')
+        if idx is None:
+            return
+        column = self.columns[idx]
+        renderer = CommitRenderer(self.context)
+        for oid in oids:
+            item = self.oidmap.get(oid)
+            if item is not None:
+                column.render(item, idx, item.commit, renderer)
+
     def show_header_menu(self, point):
         """Present the column visibility menu when the header is right-clicked"""
         menu = QtWidgets.QMenu(self)
@@ -1351,7 +1477,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             for item_idx in range(self.topLevelItemCount()):
                 item = self.topLevelItem(item_idx)
                 if item is not None:
-                    item.setText(idx, column.getter(item.commit, renderer) or '')
+                    column.render(item, idx, item.commit, renderer)
         self.setColumnHidden(idx, not visible)
         # A column that has never been displayed has no width of its own.
         if visible and column.width and self.columnWidth(idx) == 0:
@@ -1633,8 +1759,21 @@ class GitDAG(standard.MainWindow):
         self.old_oids = None
         self.old_count = 0
         self.old_display_status = None
+        self.old_show_signatures = None
         self.force_refresh = False
         self._widgets_initialized = False
+        self._github_verified = {}
+        """GitHub's verdict keyed by oid, retained across refreshes"""
+        self._github_disabled = False
+        """Set when GitHub rejects us, to avoid hammering a failing endpoint"""
+        self._github_busy = False
+        self._signatures = {}
+        """(status, signer, key) keyed by oid, retained across refreshes"""
+        self._signature_queue = []
+        """Commits still waiting to be verified, nearest the viewport first"""
+        self._signature_busy = False
+        self._stopping = False
+        """Set when the window closes so background work can bow out"""
 
         self.thread = None
         self.revtext = GitDagLineEdit(context)
@@ -1656,6 +1795,22 @@ class GitDAG(standard.MainWindow):
         self.diffwidget = diff.CommitDiffWidget(context, self, is_commit=True)
         self.filewidget = filelist.FileWidget(context, self)
         self.graphview = GraphView(context, self)
+
+        # Scrolling brings new rows into view, which are the ones worth
+        # verifying next. Debounce so that a flick does not queue a pass per
+        # scroll event.
+        self._signature_timer = QtCore.QTimer(self)
+        self._signature_timer.setSingleShot(True)
+        self._signature_timer.setInterval(150)
+        self._signature_timer.timeout.connect(self.request_signatures)
+        self.treewidget.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._signature_timer.start()
+        )
+        # closeEvent() is not delivered when the application quits out from
+        # under a secondary window, so shutdown is caught here as well.
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.stop_background_verification)
 
         self.treewidget.commits_selected.connect(
             self.commits_selected, type=Qt.QueuedConnection
@@ -2000,6 +2155,16 @@ class GitDAG(standard.MainWindow):
 
     def refresh(self):
         """Unconditionally refresh the DAG"""
+        # An explicit refresh is the point at which to re-ask about commits
+        # GitHub had not seen, since they may have been pushed since, and to
+        # pick up a "gh auth login" that happened while we were running.
+        self._github_verified = {
+            oid: verification
+            for oid, verification in self._github_verified.items()
+            if not verification.get('missing')
+        }
+        self._github_disabled = False
+        github.reset_cache()
         # self.force_refresh triggers an Unconditional redraw
         self.force_refresh = True
         cmds.do(cmds.Refresh, self.context)
@@ -2026,12 +2191,16 @@ class GitDAG(standard.MainWindow):
         refs = set(model.local_branches + model.remote_branches + model.tags)
         argv = utils.shell_split(ref or 'HEAD')
         oids = gitcmds.parse_refs(context, argv)
+        # Toggling signature verification changes the "git log" format rather
+        # than the set of commits, so it needs to force an update of its own.
+        show_signatures = prefs.dag_show_signatures(context)
         update = (
             self.force_refresh
             or count != self.old_count
             or oids != self.old_oids
             or refs != self.old_refs
             or display_status != self.old_display_status
+            or show_signatures != self.old_show_signatures
         )
         if update:
             self._stop_reader_thread()
@@ -2044,6 +2213,7 @@ class GitDAG(standard.MainWindow):
         self.old_count = count
         self.old_refs = refs
         self.old_display_status = self.params.display_status
+        self.old_show_signatures = show_signatures
         self.force_refresh = False
 
     def select_commits(self, commits):
@@ -2082,6 +2252,174 @@ class GitDAG(standard.MainWindow):
         """The reader thread has completed"""
         self.graphview.add_commits(self.commit_list)
         self.restore_selection()
+        self.start_signature_verification()
+
+    def start_signature_verification(self):
+        """Apply known signatures and queue the rest for background verification
+
+        Verifying a signature costs a GPG or SSH invocation, so it is kept out
+        of the log that populates the DAG and done here instead, after the
+        commits are on screen.
+        """
+        if self._stopping or not prefs.dag_show_signatures(self.context):
+            return
+        known = []
+        pending = []
+        for commit in self.commit_list:
+            signature = self._signatures.get(commit.oid)
+            if signature is None:
+                pending.append(commit.oid)
+            else:
+                commit.signature, commit.signer, commit.signing_key = signature
+                known.append(commit.oid)
+        self._signature_queue = pending
+        if known:
+            self.update_signatures(known)
+            self.verify_with_github()
+        self.request_signatures()
+
+    def should_stop_verification(self):
+        """Poll for shutdown; called from the background worker threads"""
+        return self._stopping
+
+    def stop_background_verification(self):
+        """Abandon signature verification so that quitting is not held up
+
+        The application waits for the thread pool to drain before it exits, so
+        pending work has to be dropped rather than left to run to completion.
+        """
+        self._stopping = True
+        self._signature_timer.stop()
+        self._signature_queue = []
+
+    def request_signatures(self):
+        """Verify the commits that are on screen, then work through the rest"""
+        if self._stopping or self._signature_busy or not self._signature_queue:
+            return
+        visible = set(self.treewidget.visible_oids())
+        batch = [oid for oid in self._signature_queue if oid in visible]
+        if not batch:
+            # Nothing on screen is outstanding; keep chipping away at the rest
+            # so the column eventually fills in for the whole history.
+            batch = self._signature_queue
+        batch = batch[:SIGNATURE_BATCH_SIZE]
+
+        self._signature_busy = True
+        task = qtutils.SimpleTask(
+            read_signatures_task, self.context, batch, self.should_stop_verification
+        )
+        self.context.runtask.start(task, result=self.signatures_ready)
+
+    def signatures_ready(self, result):
+        """Apply the signatures returned by a background verification pass"""
+        oids, signatures = result
+        self._signature_busy = False
+        if self._stopping:
+            return
+        requested = set(oids)
+        self._signature_queue = [
+            oid for oid in self._signature_queue if oid not in requested
+        ]
+        updated = []
+        for oid in oids:
+            # Commits that Git did not report back are recorded as unsigned so
+            # that they are not asked about again.
+            signature = signatures.get(oid, ('', '', ''))
+            self._signatures[oid] = signature
+            commit = self.commits.get(oid)
+            if commit is not None:
+                commit.signature, commit.signer, commit.signing_key = signature
+                updated.append(oid)
+        if updated:
+            self.update_signatures(updated)
+            self.verify_with_github()
+        if self._signature_queue:
+            self._signature_timer.start()
+
+    def verify_with_github(self):
+        """Ask GitHub to verify the signatures of the commits we just loaded
+
+        Results are cached for the lifetime of the window so that refreshing
+        does not re-query commits we have already asked about.
+        """
+        context = self.context
+        if (
+            self._stopping
+            or self._github_busy
+            or self._github_disabled
+            or not prefs.dag_show_signatures(context)
+            or not prefs.dag_github_verification(context)
+        ):
+            return
+        repository = github.repository(context)
+        if repository is None:
+            return
+
+        cached_oids = []
+        pending_oids = []
+        for commit in self.commit_list:
+            verification = self._github_verified.get(commit.oid)
+            if verification is not None:
+                commit.github_verification = verification
+                cached_oids.append(commit.oid)
+            elif commit.signature and commit.signature != 'N':
+                # Only signed commits have anything for GitHub to verify.
+                pending_oids.append(commit.oid)
+
+        if cached_oids:
+            self.update_signatures(cached_oids)
+        if not pending_oids:
+            return
+
+        owner, name = repository
+        self._github_busy = True
+        task = qtutils.SimpleTask(
+            verify_commits_with_github,
+            context,
+            owner,
+            name,
+            pending_oids,
+            self.should_stop_verification,
+        )
+        context.runtask.start(task, result=self.github_verification_ready)
+
+    def github_verification_ready(self, result):
+        """Apply the verification results returned by the background task"""
+        oids, verifications, error = result
+        self._github_busy = False
+        if self._stopping:
+            return
+        if error is not None:
+            if error.fatal:
+                self._github_disabled = True
+            Interaction.log(N_('GitHub verification failed: %s') % error)
+            return
+        updated = []
+        for oid in oids:
+            verification = verifications.get(oid)
+            if verification is None:
+                # GitHub has never seen this commit, most likely because it
+                # has not been pushed. Remember that so it is not queried
+                # again; refreshing the DAG asks once more.
+                verification = {
+                    'verified': False,
+                    'reason': N_('not found on GitHub'),
+                    'missing': True,
+                }
+            self._github_verified[oid] = verification
+            commit = self.commits.get(oid)
+            if commit is not None:
+                commit.github_verification = verification
+                updated.append(oid)
+        if updated:
+            self.update_signatures(updated)
+        # More commits may have been verified locally while this was in flight.
+        self.verify_with_github()
+
+    def update_signatures(self, oids):
+        """Re-render the signature status for the specified commits"""
+        self.treewidget.update_signatures(oids)
+        self.graphview.update_signatures(oids)
 
     def thread_status(self, successful):
         """Indicate an error when the revision input contains an invalid ref"""
@@ -2184,6 +2522,7 @@ class GitDAG(standard.MainWindow):
         """Ensure the revision text popup is closed"""
         self.revtext.close_popup()
         self._stop_reader_thread()
+        self.stop_background_verification()
         standard.MainWindow.closeEvent(self, event)
 
     def showEvent(self, event):
@@ -2457,7 +2796,7 @@ class Commit(QtWidgets.QGraphicsItem):
         self.setZValue(0)
         self.setFlag(selectable)
         self.setCursor(cursor)
-        self.setToolTip(commit.oid[:12] + ': ' + commit.summary)
+        self.update_tooltip()
 
         if commit.tags:
             self.label = label = Label(commit)
@@ -2474,6 +2813,15 @@ class Commit(QtWidgets.QGraphicsItem):
         self.pressed = False
         self.dragged = False
         self.edges = {}
+
+    def update_tooltip(self):
+        """Refresh the tooltip, which includes the signature status when known"""
+        commit = self.commit
+        tooltip = commit.oid[:12] + ': ' + commit.summary
+        signature = dag.signature_tooltip(commit)
+        if signature:
+            tooltip += '\n' + signature
+        self.setToolTip(tooltip)
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
@@ -3045,6 +3393,13 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
 
         self.layout_commits()
         self.link(commits)
+
+    def update_signatures(self, oids):
+        """Refresh the tooltips of the specified commits"""
+        for oid in oids:
+            item = self.items.get(oid)
+            if item is not None:
+                item.update_tooltip()
 
     def link(self, commits):
         """Create edges linking commits with their parents"""
