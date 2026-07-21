@@ -426,7 +426,9 @@ class ViewerMixin:
         menu.addAction(self.menu_actions['create_patch'])
         menu.addAction(self.menu_actions['create_tarball'])
         menu.addSeparator()
-        reset_menu = menu.addMenu(N_('Reset'))
+        reset_menu = qtutils.add_menu(
+            N_('Reset'), menu, icon=icons.style_dialog_reset()
+        )
         reset_menu.addAction(self.menu_actions['reset_soft'])
         reset_menu.addAction(self.menu_actions['reset_mixed'])
         reset_menu.addAction(self.menu_actions['restore_worktree'])
@@ -541,8 +543,11 @@ def viewer_actions(widget, proxy):
             icons.branch(),
             qtutils.add_action(widget, N_('Checkout Branch'), proxy.checkout_branch),
         ),
-        'checkout_detached': qtutils.add_action(
-            widget, N_('Checkout Detached HEAD'), proxy.checkout_detached
+        'checkout_detached': set_icon(
+            icons.branch(),
+            qtutils.add_action(
+                widget, N_('Checkout Detached HEAD'), proxy.checkout_detached
+            ),
         ),
         'rebase_to_commit': set_icon(
             icons.play(),
