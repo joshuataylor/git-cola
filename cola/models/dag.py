@@ -1,6 +1,7 @@
 from __future__ import annotations
 import datetime
 import json
+import re
 from collections.abc import Iterator
 
 from .. import core
@@ -14,6 +15,148 @@ LOGFMT = r'format:%H%x01%P%x01%d%x01%an%x01%ad%x01%at%x01%ae' r'%x01%cn%x01%cd%x
 LOGSEP = chr(0x01)
 STAGE = 'STAGE'
 WORKTREE = 'WORKTREE'
+
+# Signature verification is deliberately kept out of LOGFMT. The %G?
+# placeholders make "git log" verify every signed commit before it emits any
+# output, which would delay the whole DAG. Signatures are read separately by
+# read_signatures() once the commits are on screen.
+SIGNATURE_LOGFMT = r'format:%H%x01%G?%x01%GS%x01%GK'
+
+OID_REGEX = re.compile(r'^[0-9a-f]{7,64}$')
+"""Matches an object ID, which STAGE and WORKTREE deliberately are not"""
+
+
+class SignatureStatus:
+    """Severity levels derived from git's "%G?" signature status character"""
+
+    NONE = 'none'
+    """The commit is not signed"""
+    GOOD = 'good'
+    """The signature is valid and trusted"""
+    UNKNOWN = 'unknown'
+    """The signature is valid but its validity or key could not be established"""
+    BAD = 'bad'
+    """The signature is invalid or was made by a revoked key"""
+
+
+_SIGNATURE_SEVERITIES = {
+    'G': SignatureStatus.GOOD,
+    'U': SignatureStatus.UNKNOWN,
+    'X': SignatureStatus.UNKNOWN,
+    'Y': SignatureStatus.UNKNOWN,
+    'E': SignatureStatus.UNKNOWN,
+    'R': SignatureStatus.BAD,
+    'B': SignatureStatus.BAD,
+}
+
+
+def signature_severity(commit) -> str:
+    """Return the SignatureStatus severity for a commit
+
+    >>> signature_severity(None)
+    'none'
+
+    """
+    signature = getattr(commit, 'signature', '')
+    return _SIGNATURE_SEVERITIES.get(signature, SignatureStatus.NONE)
+
+
+def signature_label(commit) -> str:
+    """Return a short label describing a commit's signature status"""
+    labels = {
+        'G': N_('Verified'),
+        'U': N_('Unknown validity'),
+        'X': N_('Expired signature'),
+        'Y': N_('Expired key'),
+        'R': N_('Revoked key'),
+        'B': N_('Bad signature'),
+        'E': N_('Unchecked'),
+    }
+    return labels.get(getattr(commit, 'signature', ''), '')
+
+
+def signature_tooltip(commit) -> str:
+    """Return a multi-line description of a commit's signature, or an empty string
+
+    Both the local "%G?" verification and GitHub's verdict are reported when
+    they are available. They can legitimately disagree -- GitHub validates
+    against the keys its users registered, whereas git validates against your
+    local keyring -- so neither result is hidden.
+    """
+    descriptions = {
+        'G': N_('Good signature'),
+        'U': N_('Good signature with unknown validity'),
+        'X': N_('Good signature that has expired'),
+        'Y': N_('Good signature made by an expired key'),
+        'R': N_('Good signature made by a revoked key'),
+        'B': N_('Bad signature'),
+        'E': N_('Signature could not be checked'),
+    }
+    lines = []
+    description = descriptions.get(getattr(commit, 'signature', ''), '')
+    if description:
+        signer = commit.signer
+        if signer:
+            description = f'{description} - {signer}'
+        lines.append(description)
+        if commit.signing_key:
+            lines.append(N_('Key: %s') % commit.signing_key)
+
+    verification = getattr(commit, 'github_verification', None)
+    if verification:
+        if verification.get('verified'):
+            lines.append(N_('Verified by GitHub'))
+        else:
+            reason = verification.get('reason') or N_('unverified')
+            lines.append(N_('Not verified by GitHub: %s') % reason)
+
+    return '\n'.join(lines)
+
+
+def read_signatures(context, oids: list[str]) -> dict[str, tuple[str, str, str]]:
+    """Verify the specified commits and return {oid: (status, signer, key)}
+
+    Verification is expensive -- roughly a GPG or SSH invocation per signed
+    commit -- so this is called in the background for a batch of commits at a
+    time rather than being folded into the log that populates the DAG.
+
+    "--no-walk" restricts the output to the commits that were asked for
+    instead of walking their history. Anything that is not an object ID is
+    dropped first: the STAGE and WORKTREE placeholders are not revisions, and
+    a single unknown argument makes "git log" fail the entire batch.
+    """
+    oids = [oid for oid in oids if OID_REGEX.match(oid)]
+    if not oids:
+        return {}
+    cmd = [
+        'git',
+        '-c',
+        'log.abbrevCommit=false',
+        '-c',
+        'log.showSignature=false',
+        'log',
+        '--no-walk=unsorted',
+        '--no-patch',
+        '--pretty=' + SIGNATURE_LOGFMT,
+        *oids,
+    ]
+    # Signature verification writes complaints to stderr, e.g. when
+    # gpg.ssh.allowedSignersFile is unset. The status character already
+    # conveys that, so stderr is discarded.
+    status, out, _ = core.run_command(cmd)
+    if status != 0:
+        return {}
+
+    signatures = {}
+    for line in out.splitlines():
+        if not line:
+            continue
+        fields = line.split(LOGSEP)
+        if len(fields) != 4:
+            continue
+        oid, signature, signer, signing_key = fields
+        signatures[oid] = (signature, signer, signing_key)
+    return signatures
 
 
 def _parse_timestamp(value: str) -> int:
@@ -113,6 +256,10 @@ class Commit:
         'commitdate',
         'committer_timestamp',
         'committer_email',
+        'signature',
+        'signer',
+        'signing_key',
+        'github_verification',
         'generation',
         'oid',
         'parents',
@@ -142,6 +289,12 @@ class Commit:
         self.committer_email: str | None = None
         self.commitdate: str | None = None
         self.committer_timestamp: int = 0
+        self.signature: str = ''
+        """The "%G?" signature status character, empty when not requested"""
+        self.signer: str = ''
+        self.signing_key: str = ''
+        self.github_verification: dict | None = None
+        """GitHub's verdict, filled in asynchronously when enabled"""
         self.parsed = False
         self.generation = CommitFactory.root_generation
         self.column = None
@@ -245,7 +398,7 @@ class Commit:
         return self.oid
 
     def data(self) -> dict[str, str | None | list[str | None] | list[str]]:
-        return {
+        data: dict[str, str | None | list[str | None] | list[str]] = {
             'oid': self.oid,
             'summary': self.summary,
             'author': self.author,
@@ -253,6 +406,11 @@ class Commit:
             'parents': [p.oid for p in self.parents],
             'tags': self.tags,
         }
+        if self.signature:
+            data['signature'] = self.signature
+            data['signer'] = self.signer
+            data['signing_key'] = self.signing_key
+        return data
 
     def __repr__(self) -> str:
         return json.dumps(self.data(), sort_keys=True, indent=4, default=list)
