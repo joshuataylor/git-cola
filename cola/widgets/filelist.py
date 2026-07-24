@@ -24,7 +24,17 @@ class FileWidget(TreeWidget):
         TreeWidget.__init__(self, parent)
         self.context = context
         self._columns_initialized = False
+        # Guards _resize_columns() from mistaking its own section changes for a
+        # manual drag, and records once the user has taken control of the widths.
+        self._auto_resizing = False
+        self._user_adjusted_columns = False
         self.setHeaderLabels([N_('Filename'), '+', '-'])
+        header = self.header()
+        # The Filename column absorbs the free space; without this the last
+        # (narrow "-") column would stretch instead. Disabling it also keeps
+        # widget resizes from firing sectionResized and looking like a drag.
+        header.setStretchLastSection(False)
+        header.sectionResized.connect(self._section_resized)
 
         self.show_history_action = qtutils.add_action(
             self, N_('Show History'), self.show_history, hotkeys.HISTORY
@@ -136,6 +146,11 @@ class FileWidget(TreeWidget):
             files.append(item)
         self.insertTopLevelItems(0, files)
 
+    def _section_resized(self, _index, _old, _new):
+        """Record a manual column resize so we stop overriding it"""
+        if not self._auto_resizing:
+            self._user_adjusted_columns = True
+
     def _resize_columns(self):
         """Set columns to their initial size"""
         header_width = self.header().width() - 1
@@ -143,9 +158,13 @@ class FileWidget(TreeWidget):
         numbers_max = qtutils.fontmetrics_width(metrics, '12345678')  # Linux had 28,000,000+ LOC of code in 2020.
         numbers_width = min(numbers_max, header_width // 8 - 1)
         files_width = header_width - numbers_width * 2
-        self.setColumnWidth(0, files_width)
-        self.setColumnWidth(1, numbers_width)
-        self.setColumnWidth(2, numbers_width)
+        self._auto_resizing = True
+        try:
+            self.setColumnWidth(0, files_width)
+            self.setColumnWidth(1, numbers_width)
+            self.setColumnWidth(2, numbers_width)
+        finally:
+            self._auto_resizing = False
 
     def showEvent(self, event):
         """Defer initializaztion of column widths"""
@@ -155,9 +174,12 @@ class FileWidget(TreeWidget):
             self._resize_columns()
 
     def resizeEvent(self, event):
-        """Defer initializaztion of column widths"""
+        """Grow the Filename column with the widget until the user resizes one"""
         super().resizeEvent(event)
-        self._resize_columns()
+        # Once the user has dragged a column, keep their widths instead of
+        # snapping back to the computed layout on every resize.
+        if not self._user_adjusted_columns:
+            self._resize_columns()
 
     def contextMenuEvent(self, event):
         menu = qtutils.create_menu(N_('Actions'), self)
