@@ -1001,6 +1001,9 @@ class Viewer(QtWidgets.QFrame):
         """Update the filename display when the selection changes"""
         filename = self.context.selection.filename()
         self.filename.set_text(filename or '')
+        # The label elides when the titlebar is narrow; surface the full path
+        # on hover and make a plain click copy it to the clipboard.
+        self.filename.setToolTip(filename or '')
 
     def update_options(self):
         """Emit a signal indicating that options have changed"""
@@ -1296,6 +1299,12 @@ class Options(QtWidgets.QWidget):
         menu.addAction(self.intraline_diff_timing)
 
         # Layouts
+        #
+        # The filename label is greedy (MinimumExpanding) so it claims the
+        # free width and only elides when genuinely cramped. There is no
+        # trailing stretch -- that would split the slack with the label and
+        # force it to elide early. Instead the whole widget expands (below) so
+        # the label has room, and the image-mode combos sit at the right edge.
         layout = qtutils.hbox(
             defs.no_margin,
             defs.button_spacing,
@@ -1304,9 +1313,11 @@ class Options(QtWidgets.QWidget):
             self.filename,
             self.image_mode,
             self.zoom_mode,
-            qtutils.STRETCH,
         )
         self.setLayout(layout)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred
+        )
 
         # Policies
         self.image_mode.setFocusPolicy(Qt.NoFocus)
