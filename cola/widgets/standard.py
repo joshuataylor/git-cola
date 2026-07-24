@@ -320,6 +320,7 @@ class ListWidget(QtWidgets.QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        qtutils.set_scroll_per_pixel(self)
 
         self.up_action = qtutils.add_action(
             self,
@@ -649,6 +650,7 @@ class TreeView(QtWidgets.QTreeView):
     def __init__(self, parent=None):
         QtWidgets.QTreeView.__init__(self, parent)
         self._mixin = self.Mixin(self, QtWidgets.QTreeView)
+        qtutils.set_scroll_per_pixel(self)
 
     def keyPressEvent(self, event):
         return self._mixin.keyPressEvent(event)
@@ -682,6 +684,7 @@ class TreeWidget(QtWidgets.QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mixin = self.Mixin(self, QtWidgets.QTreeWidget)
+        qtutils.set_scroll_per_pixel(self)
 
     def keyPressEvent(self, event):
         return self._mixin.keyPressEvent(event)
