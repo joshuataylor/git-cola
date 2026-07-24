@@ -64,3 +64,10 @@ def test_programmatic_resize_is_not_mistaken_for_a_drag(file_widget):
     widget._resize_columns()
 
     assert widget._user_adjusted_columns is False
+
+
+def test_file_list_scrolls_per_pixel(file_widget):
+    """The tree inherits smooth per-pixel scrolling from standard.TreeWidget."""
+    widget, _qapp = file_widget
+    per_pixel = QtWidgets.QAbstractItemView.ScrollPerPixel
+    assert widget.verticalScrollMode() == per_pixel
