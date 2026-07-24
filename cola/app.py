@@ -390,6 +390,46 @@ class ColaApplication:
         """QApplication::exit(status) pass-through"""
         return self._app.exit(status)
 
+    def flush_pending_repo_paths(self) -> None:
+        """Open repositories that arrived via FileOpen before the view existed"""
+        if self._app is not None:
+            self._app.flush_pending_repo_paths()
+
+
+def worktree_for_path(path: str) -> str | None:
+    """Resolve a filesystem path delivered by macOS to a git worktree.
+
+    macOS hands the app a folder (Open With / drop-on-dock) or a file inside a
+    repository. Return the enclosing worktree, or None when the path is not
+    part of a git repository.
+    """
+    if not path:
+        return None
+    # macOS only ever delivers local filesystem paths here, so resolve the
+    # worktree with local operations.
+    ops = operations_local.LocalOperations()
+    path = core.abspath(path)
+    if core.isfile(path):
+        path = os.path.dirname(path)
+    if git.is_git_worktree(ops, path):
+        return path
+    # Walk up to find an enclosing worktree for a subdirectory.
+    worktree = git.Paths(ops).get(path).worktree
+    return worktree or None
+
+
+def open_worktree(context: ApplicationContext, worktree: str) -> None:
+    """Open a worktree, reusing an empty window or spawning a new one.
+
+    An already-populated window keeps its repository and the new one opens in a
+    separate process; an empty startup window adopts the repository instead of
+    leaving a stray blank window behind.
+    """
+    if context.git.is_valid():
+        cmds.do(cmds.OpenNewRepo, context, worktree)
+    else:
+        cmds.do(cmds.OpenRepo, context, worktree)
+
 
 class ColaQApplication(QtWidgets.QApplication):
     """QApplication implementation for handling custom events"""
@@ -397,12 +437,41 @@ class ColaQApplication(QtWidgets.QApplication):
     def __init__(self, context: ApplicationContext, argv: list[str]) -> None:
         super().__init__(argv)
         self.context = context
+        # Repositories delivered by macOS FileOpen events before the main
+        # window is ready are buffered here and opened once it exists.
+        self._pending_repo_paths: list[str] = []
         # Make icons sharp in HiDPI screen
         if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
             self.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
+    def open_repo_path(self, path: str) -> None:
+        """Handle a macOS FileOpen event for the given path"""
+        worktree = worktree_for_path(path)
+        if not worktree:
+            return
+        context = self.context
+        if context is None or context.view is None:
+            self._pending_repo_paths.append(worktree)
+        else:
+            open_worktree(context, worktree)
+
+    def flush_pending_repo_paths(self) -> None:
+        """Open any repositories buffered before the main window existed"""
+        context = self.context
+        if context is None or context.view is None:
+            return
+        paths, self._pending_repo_paths = self._pending_repo_paths, []
+        for worktree in paths:
+            open_worktree(context, worktree)
+
     def event(self, e: QtCore.QEvent) -> bool:
         """Respond to focus events for the cola.refreshonfocus feature"""
+        if e.type() == QtCore.QEvent.FileOpen:
+            # macOS delivers "Open With" / drop-on-dock / double-clicked repos
+            # as a FileOpen event rather than on the command line.
+            path = e.file() or e.url().toLocalFile()
+            self.open_repo_path(path)
+            return True
         if hasattr(QtCore.QEvent, 'ApplicationPaletteChange'):
             if e.type() == QtCore.QEvent.ApplicationPaletteChange:
                 cola_app = getattr(self.context, 'app', None)
@@ -626,6 +695,9 @@ def initialize_view(context: ApplicationContext, view: ViewType) -> None:
     view.show()
     if sys.platform == 'darwin':
         view.raise_()
+    if context.app is not None:
+        # Drain any FileOpen events that arrived before the window existed.
+        context.app.flush_pending_repo_paths()
 
 
 def application_start(context, view) -> int:
