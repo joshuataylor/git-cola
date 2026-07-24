@@ -1,5 +1,6 @@
 import argparse
 import os
+import plistlib
 import sys
 import types
 from unittest.mock import MagicMock
@@ -230,3 +231,29 @@ def test_open_repo_path_ignores_non_repository(monkeypatch, tmp_path):
 
     assert opened == []
     assert instance._pending_repo_paths == []
+
+
+def _load_darwin_plist():
+    path = os.path.join(
+        os.path.dirname(__file__), '..', 'contrib', 'darwin', 'Info.plist'
+    )
+    with open(path, 'rb') as plist_file:
+        return plistlib.load(plist_file)
+
+
+def test_darwin_plist_defines_a_single_bundle_name():
+    """A duplicate CFBundleName is invalid; only the first wins."""
+    plist = _load_darwin_plist()
+    assert plist['CFBundleName'] == 'Git Cola'
+
+
+def test_darwin_plist_associates_folders_with_modern_utis():
+    """Modern macOS keys folder association off LSItemContentTypes, not OSTypes.
+
+    Without the folder UTIs Finder's 'Open With' and drop-on-dock associations
+    are unreliable, which undercuts the FileOpen handling.
+    """
+    plist = _load_darwin_plist()
+    document_types = plist['CFBundleDocumentTypes']
+    content_types = document_types[0]['LSItemContentTypes']
+    assert 'public.folder' in content_types
