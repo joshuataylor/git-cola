@@ -117,3 +117,25 @@ def test_focus_in_mouse_reason_leaves_cursor_untouched(qapp):
 
     assert widget.textCursor().position() == 0
     assert not widget.textCursor().hasSelection()
+
+
+def test_select_context_word_selects_word_when_nothing_selected(qapp):
+    """Right-clicking without a selection grabs the word for spell suggestions."""
+    widget = _make_line_edit('hello world')
+    # Cursor at start, on the first word, with no selection.
+
+    widget.select_context_word()
+
+    assert widget.textCursor().selectedText() == 'hello'
+
+
+def test_select_context_word_preserves_a_multiword_selection(qapp):
+    """An existing multi-word selection is kept so Copy/Cut act on all of it."""
+    text = 'hello world'
+    widget = _make_line_edit(text)
+    widget.selectAll()
+    assert widget.textCursor().selectedText() == text
+
+    widget.select_context_word()
+
+    assert widget.textCursor().selectedText() == text
