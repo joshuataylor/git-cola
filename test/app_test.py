@@ -1,10 +1,17 @@
 import argparse
+import os
 import sys
 import types
 from unittest.mock import MagicMock
 
 from cola import app
+from cola import core
 from qtpy import QtCore
+
+from .helper import app_context
+
+# Prevent unused imports lint errors.
+assert app_context is not None
 
 
 def test_setup_environment():
@@ -119,3 +126,107 @@ def test_set_application_name_swallows_cocoa_exceptions(monkeypatch):
     app.set_application_name('Test App')
     # Qt-side name still got set despite the AppKit explosion.
     assert QtCore.QCoreApplication.applicationName() == 'Test App'
+
+
+# FileOpen handling (macOS "Open With" / drop-on-dock / double-clicked repos)
+
+
+def test_worktree_for_path_resolves_repo_root(app_context):
+    root = core.getcwd()
+    assert app.worktree_for_path(root) == core.abspath(root)
+
+
+def test_worktree_for_path_resolves_subdirectory(app_context):
+    root = core.getcwd()
+    sub = os.path.join(root, 'sub')
+    os.mkdir(sub)
+    assert app.worktree_for_path(sub) == core.abspath(root)
+
+
+def test_worktree_for_path_resolves_file_inside_repo(app_context):
+    root = core.getcwd()
+    assert app.worktree_for_path(os.path.join(root, 'A')) == core.abspath(root)
+
+
+def test_worktree_for_path_returns_none_outside_repo(tmp_path):
+    assert app.worktree_for_path(str(tmp_path)) is None
+
+
+def test_worktree_for_path_returns_none_for_empty():
+    assert app.worktree_for_path('') is None
+
+
+def test_open_worktree_spawns_new_window_for_valid_repo(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.cmds, 'do', lambda cmd, ctx, arg: calls.append((cmd, arg)))
+    context = MagicMock()
+    context.git.is_valid.return_value = True
+
+    app.open_worktree(context, '/repo')
+
+    assert calls == [(app.cmds.OpenNewRepo, '/repo')]
+
+
+def test_open_worktree_adopts_empty_startup_window(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.cmds, 'do', lambda cmd, ctx, arg: calls.append((cmd, arg)))
+    context = MagicMock()
+    context.git.is_valid.return_value = False
+
+    app.open_worktree(context, '/repo')
+
+    assert calls == [(app.cmds.OpenRepo, '/repo')]
+
+
+def _make_qapplication(context):
+    """Build a ColaQApplication without invoking the QApplication singleton."""
+    instance = app.ColaQApplication.__new__(app.ColaQApplication)
+    instance.context = context
+    instance._pending_repo_paths = []
+    return instance
+
+
+def test_open_repo_path_opens_immediately_when_view_exists(monkeypatch, app_context):
+    opened = []
+    monkeypatch.setattr(app, 'open_worktree', lambda ctx, wt: opened.append(wt))
+    context = MagicMock()
+    context.view = MagicMock()
+    instance = _make_qapplication(context)
+
+    instance.open_repo_path(core.getcwd())
+
+    assert opened == [core.abspath(core.getcwd())]
+    assert instance._pending_repo_paths == []
+
+
+def test_open_repo_path_buffers_until_view_exists(monkeypatch, app_context):
+    opened = []
+    monkeypatch.setattr(app, 'open_worktree', lambda ctx, wt: opened.append(wt))
+    context = MagicMock()
+    context.view = None
+    instance = _make_qapplication(context)
+    root = core.abspath(core.getcwd())
+
+    instance.open_repo_path(root)
+    # Buffered, not opened, while the main window does not yet exist.
+    assert opened == []
+    assert instance._pending_repo_paths == [root]
+
+    # Once the view exists the buffered repository is opened and cleared.
+    context.view = MagicMock()
+    instance.flush_pending_repo_paths()
+    assert opened == [root]
+    assert instance._pending_repo_paths == []
+
+
+def test_open_repo_path_ignores_non_repository(monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr(app, 'open_worktree', lambda ctx, wt: opened.append(wt))
+    context = MagicMock()
+    context.view = MagicMock()
+    instance = _make_qapplication(context)
+
+    instance.open_repo_path(str(tmp_path))
+
+    assert opened == []
+    assert instance._pending_repo_paths == []
