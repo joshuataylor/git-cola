@@ -147,6 +147,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.selection_model = context.selection
 
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        qtutils.set_scroll_per_pixel(self)
         self.headerItem().setHidden(True)
         self.setAllColumnsShowFocus(True)
         self.setSortingEnabled(False)
