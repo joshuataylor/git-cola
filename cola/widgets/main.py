@@ -285,6 +285,11 @@ class MainView(standard.MainWindow):
             prefs_func,
             QtGui.QKeySequence.Preferences,
         )
+        # Tell Qt's Cocoa plugin where these belong in the macOS application
+        # menu. Without an explicit role Qt falls back to matching the English
+        # label text, which fails once the label is translated -- leaving
+        # duplicate Quit/About entries in the wrong menus.
+        self.preferences_action.setMenuRole(QtWidgets.QAction.PreferencesRole)
 
         self.edit_remotes_action = qtutils.add_action_with_icon(
             self,
@@ -355,6 +360,7 @@ class MainView(standard.MainWindow):
         self.quit_action = qtutils.add_action(
             self, N_('Quit'), self.close, hotkeys.QUIT
         )
+        self.quit_action.setMenuRole(QtWidgets.QAction.QuitRole)
 
         self.grep_action = qtutils.add_action_with_icon(
             self, icons.search(), N_('Grep'), partial(grep.grep, context), hotkeys.GREP
@@ -545,6 +551,7 @@ class MainView(standard.MainWindow):
         self.help_about_action = qtutils.add_action(
             self, N_('About'), partial(about.about_dialog, context)
         )
+        self.help_about_action.setMenuRole(QtWidgets.QAction.AboutRole)
 
         self.diff_against_commit_action = qtutils.add_action_with_icon(
             self,
