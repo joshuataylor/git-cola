@@ -60,12 +60,21 @@ class SpellCheckTextEdit(HintedTextEdit):
 
         return popup_menu
 
+    def select_context_word(self):
+        """Select the word under the cursor unless a selection already exists.
+
+        The word-under-cursor selection exists so the menu can offer spelling
+        suggestions for it, but doing it unconditionally wiped a multi-word
+        selection -- collapsing it to a single word and breaking Copy/Cut.
+        """
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            cursor.select(QtGui.QTextCursor.WordUnderCursor)
+            self.setTextCursor(cursor)
+
     def contextMenuEvent(self, event):
         """Select the current word and then show a context menu"""
-        # Select the word under the cursor before calling the default contextMenuEvent.
-        cursor = self.textCursor()
-        cursor.select(QtGui.QTextCursor.WordUnderCursor)
-        self.setTextCursor(cursor)
+        self.select_context_word()
         super().contextMenuEvent(event)
 
     def correct(self, word):
