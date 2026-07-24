@@ -726,6 +726,19 @@ def persist_clipboard(text: str | None = None) -> None:
     QtWidgets.QApplication.sendEvent(clipboard, event)
 
 
+def set_scroll_per_pixel(widget: QtWidgets.QAbstractItemView) -> None:
+    """Scroll item views by pixel rather than by item.
+
+    Per-item scrolling jumps a whole row at a time, which turns trackpad and
+    high-resolution wheel scrolling into coarse steps. Per-pixel scrolling
+    gives the smooth, momentum-carrying scroll expected on macOS (and reads
+    fine everywhere else).
+    """
+    mode = QtWidgets.QAbstractItemView.ScrollPerPixel
+    widget.setVerticalScrollMode(mode)
+    widget.setHorizontalScrollMode(mode)
+
+
 def add_action_bool(
     widget: QtWidgets.QWidget, text: str, func: Callable, checked: bool, *shortcuts: Any
 ) -> QtGui.QAction:
