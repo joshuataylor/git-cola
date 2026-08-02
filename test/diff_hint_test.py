@@ -53,3 +53,22 @@ def diff_editor(qapp, tmp_path, monkeypatch):
 def test_diff_editor_shows_empty_state_hint(diff_editor):
     """With no diff loaded the pane guides the user instead of showing blank."""
     assert diff_editor.placeholderText() == 'Select a file to view its diff'
+
+
+def test_options_spacer_pins_gear_left_when_filename_hidden(qapp):
+    """Hiding the filename shows the spacer so the gear button stays left."""
+    parent = QtWidgets.QWidget()
+    options = Options(parent, filename=PlainTextLabel(parent=parent))
+    try:
+        # With the filename shown the greedy label claims the slack, so the
+        # spacer stays hidden.
+        assert options.spacer.isHidden()
+
+        options.set_filename_visible(False)
+        assert not options.spacer.isHidden()
+
+        options.set_filename_visible(True)
+        assert options.spacer.isHidden()
+    finally:
+        options.close()
+        parent.close()
