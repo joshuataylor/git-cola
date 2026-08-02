@@ -1049,6 +1049,7 @@ class Viewer(QtWidgets.QFrame):
         """Enable/disable displaying the selected filename"""
         self.filename.setVisible(enabled)
         self.diffstat.setVisible(enabled)
+        self.options.set_filename_visible(enabled)
         if update:
             with qtutils.BlockSignals(self.options.show_filenames):
                 self.options.show_filenames.setChecked(enabled)
@@ -1380,6 +1381,16 @@ class Options(QtWidgets.QWidget):
             tooltip=N_('Diff Options'), icon=icons.configure()
         )
 
+        # Trailing spacer that claims the free width when the filename label is
+        # hidden. Without it, the (Expanding) toolbar would center its lone gear
+        # button. Hidden while the greedy filename label is shown so the label
+        # keeps the slack instead. See set_filename_visible().
+        self.spacer = QtWidgets.QWidget(self)
+        self.spacer.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred
+        )
+        self.spacer.hide()
+
         self.toggle_image_diff = qtutils.create_action_button(
             tooltip=N_('Toggle image diff'), icon=icons.visualize()
         )
@@ -1484,12 +1495,15 @@ class Options(QtWidgets.QWidget):
         # trailing stretch -- that would split the slack with the label and
         # force it to elide early. Instead the whole widget expands (below) so
         # the label has room, and the image-mode combos sit at the right edge.
+        # When the filename label is hidden, self.spacer takes over claiming
+        # the slack so the gear button stays pinned to the left.
         layout = qtutils.hbox(
             defs.no_margin,
             defs.button_spacing,
             self.options,
             self.toggle_image_diff,
             self.filename,
+            self.spacer,
             self.image_mode,
             self.zoom_mode,
         )
@@ -1504,6 +1518,15 @@ class Options(QtWidgets.QWidget):
         self.options.setFocusPolicy(Qt.NoFocus)
         self.toggle_image_diff.setFocusPolicy(Qt.NoFocus)
         self.setFocusPolicy(Qt.NoFocus)
+
+    def set_filename_visible(self, visible):
+        """Track the filename label's visibility so the toolbar stays left-aligned
+
+        The greedy filename label normally claims the toolbar's free width and
+        keeps the gear button at the left. When it is hidden, the spacer claims
+        that width instead, otherwise the lone gear button would be centered.
+        """
+        self.spacer.setVisible(not visible)
 
     def set_file_type(self, file_type):
         """Set whether we are viewing an image file type"""
