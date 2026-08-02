@@ -390,6 +390,34 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         self.restore_scrollbar()
 
+    def scroll_to_diff_header(self):
+        """Scroll so the first file's diff header sits at the top of the view
+
+        Commit diffs prepend the commit message body before the patch text.
+        When a file is selected we want its diff in view rather than the
+        message, so the viewport is moved past the message to the "diff --git"
+        header (falling back to the first hunk when there is no such header).
+        """
+        text = self._current_diff_text
+        if not text:
+            return
+        if text.startswith('diff --git '):
+            position = 0
+        else:
+            newline = text.find('\ndiff --git ')
+            if newline == -1:
+                newline = text.find('\n@@ ')
+            if newline == -1:
+                return
+            position = newline + 1
+
+        cursor = self.textCursor()
+        cursor.setPosition(position)
+        # Park the viewport at the end first; revealing the target then scrolls
+        # up just enough to land the header at the top of the viewport.
+        self.moveCursor(QtGui.QTextCursor.End)
+        self.setTextCursor(cursor)
+
     def set_ansi_diff(self, diff):
         """Render ANSI-coloured diff text from an external diff tool
 
@@ -2084,6 +2112,9 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # memory is in-process only and is not persisted across DAG sessions.
         self._displayed_diff_key = None
         self._scroll_positions = {}
+        # Diff token of a file-selection load whose result should scroll past
+        # the commit message to the file's diff header. Matched in set_diff().
+        self._scroll_to_header_token = None
 
         # Debounce diff loading so that rapidly moving the selection (e.g.
         # holding an arrow key in the DAG) only loads the diff for the commit
@@ -2260,6 +2291,11 @@ class CommitDiffWidget(QtWidgets.QWidget):
             self.diff.set_ansi_diff(diff)
         else:
             self.diff.set_diff(diff)
+        # A file was clicked in the tree: reveal its diff, not the commit
+        # message that precedes it.
+        if token is not None and token == self._scroll_to_header_token:
+            self.diff.scroll_to_diff_header()
+            self._scroll_to_header_token = None
 
     def set_details(self, oid, author, email, date, summary):
         template_args = {'author': author, 'email': email}
@@ -2297,6 +2333,10 @@ class CommitDiffWidget(QtWidgets.QWidget):
             self.set_diff_range(oid_start.oid, oid_end.oid, **extra_args)
         else:
             self.set_diff_oid(self.oid, **extra_args)
+        # start_diff_task() bumped _diff_token for the load just started; tag it
+        # so its result scrolls past the commit message to the file's diff.
+        if filenames:
+            self._scroll_to_header_token = self._diff_token
 
 
 class DiffPanel(QtWidgets.QWidget):
