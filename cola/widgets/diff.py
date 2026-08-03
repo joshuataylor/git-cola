@@ -1238,15 +1238,17 @@ class Options(QtWidgets.QWidget):
             tooltip=N_('Diff Options'), icon=icons.configure()
         )
 
-        # Trailing spacer that claims the free width when the filename label is
-        # hidden. Without it, the (Expanding) toolbar would center its lone gear
-        # button. Hidden while the greedy filename label is shown so the label
-        # keeps the slack instead. See set_filename_visible().
+        # Trailing spacer that claims the free width when no greedy filename
+        # label is present. Without it, the (Expanding) toolbar would center its
+        # lone gear button. With a filename label it starts hidden and
+        # set_filename_visible() toggles it as "Show filenames" changes; with no
+        # label (e.g. the DAG's diff options toolbar, created with filename=None)
+        # it must claim the slack from the start. See set_filename_visible().
         self.spacer = QtWidgets.QWidget(self)
         self.spacer.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred
         )
-        self.spacer.hide()
+        self.spacer.setVisible(self.filename is None)
 
         self.toggle_image_diff = qtutils.create_action_button(
             tooltip=N_('Toggle image diff'), icon=icons.visualize()
