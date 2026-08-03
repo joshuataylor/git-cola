@@ -909,7 +909,7 @@ class GitDialog(QtWidgets.QDialog):
             dlg.set_text(default)
 
         dlg.show()
-        QtCore.QTimer().singleShot(250, dlg.lineedit.show_popup)
+        QtCore.QTimer.singleShot(250, dlg.lineedit.show_popup)
 
         if dlg.exec_() == cls.Accepted:
             return dlg.text()
