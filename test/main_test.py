@@ -39,6 +39,11 @@ def main_view(qapp, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     helper.initialize_repo()
 
+    # Closing the window saves settings (recent repos, window geometry). Point
+    # the settings file at a throwaway path so the test never writes to the
+    # developer's real ~/.config/git-cola/settings.
+    monkeypatch.setattr(Settings, 'config_path', str(tmp_path / 'settings'))
+
     context = MagicMock()
     context.git = git.create()
     context.git.set_worktree(core.getcwd())
