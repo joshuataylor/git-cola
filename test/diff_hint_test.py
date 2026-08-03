@@ -72,3 +72,20 @@ def test_options_spacer_pins_gear_left_when_filename_hidden(qapp):
     finally:
         options.close()
         parent.close()
+
+
+def test_options_spacer_default_visibility_follows_filename(qapp):
+    """The spacer claims the slack by default only when there is no filename."""
+    parent = QtWidgets.QWidget()
+    try:
+        # No filename label (e.g. the DAG diff options toolbar): the spacer must
+        # be visible from the start so the lone gear button stays left-aligned.
+        without_filename = Options(parent, filename=None)
+        assert not without_filename.spacer.isHidden()
+
+        # A filename label present (e.g. the main-window Viewer): the greedy
+        # label claims the slack, so the spacer starts hidden.
+        with_filename = Options(parent, filename=PlainTextLabel(parent=parent))
+        assert with_filename.spacer.isHidden()
+    finally:
+        parent.close()
