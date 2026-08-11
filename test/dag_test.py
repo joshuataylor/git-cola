@@ -1,5 +1,6 @@
 """Tests DAG functionality"""
 import sys
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -610,3 +611,72 @@ def test_apply_state_without_column_keys(qapp, app_context):
     visible = [column.key for _, column in tree.visible_columns()]
     assert visible == ['summary', 'author', 'date']
     assert tree.columnWidth(0) == 100
+
+
+def _make_lazy_graph_dag(app_context, visible):
+    """Build a GitDAG with a mock graphview/dock for lazy-build tests"""
+    win = GitDAG.__new__(GitDAG)
+    win.graphview = MagicMock()
+    win.graphview_dock = MagicMock()
+    win.graphview_dock.isVisible.return_value = visible
+    win.commit_list = [_commit_for_columns(app_context)]
+    win.selection = []
+    win.old_selection = []
+    win._graph_stale = True
+    win._graph_build_id = 1
+    win._commits_loaded = False
+    # thread_end drives these; they are exercised by their own tests.
+    win.restore_selection = MagicMock()
+    win.start_signature_verification = MagicMock()
+    return win
+
+
+def test_hidden_graph_dock_defers_build_until_revealed(qapp, app_context):
+    """A hidden Graph dock is not populated until it becomes visible."""
+    win = _make_lazy_graph_dag(app_context, visible=False)
+
+    win.thread_end()
+    # The reader finished, but the hidden canvas was not built.
+    assert win._commits_loaded is True
+    assert win._graph_stale is True
+    win.graphview.add_commits.assert_not_called()
+
+    # Revealing the dock builds the canvas from the full commit list.
+    win._graphview_visibility_changed(True)
+    win.graphview.add_commits.assert_called_once_with(win.commit_list)
+    assert win._graph_stale is False
+
+
+def test_visible_graph_dock_builds_deferred(qapp, app_context):
+    """A visible Graph dock builds on the next event-loop turn, not inline."""
+    win = _make_lazy_graph_dag(app_context, visible=True)
+
+    win.thread_end()
+    # Deferred: nothing built synchronously inside thread_end.
+    win.graphview.add_commits.assert_not_called()
+
+    qapp.processEvents()  # let the singleShot(0) build fire
+    win.graphview.add_commits.assert_called_once_with(win.commit_list)
+    assert win._graph_stale is False
+
+
+def test_reveal_before_reader_finishes_does_not_build(qapp, app_context):
+    """Revealing the dock mid-load must not lay out a partial history."""
+    win = _make_lazy_graph_dag(app_context, visible=True)
+    # Reader still running: _commits_loaded is False.
+    win._graphview_visibility_changed(True)
+    win.graphview.add_commits.assert_not_called()
+    assert win._graph_stale is True
+
+
+def test_superseded_deferred_build_bails(qapp, app_context):
+    """A deferred build from a prior reload no-ops once a new reload starts."""
+    win = _make_lazy_graph_dag(app_context, visible=True)
+    win._commits_loaded = True
+
+    # A newer reload has bumped the build id since this build was queued.
+    win._graph_build_id = 2
+    win._populate_graphview(1)
+
+    win.graphview.add_commits.assert_not_called()
+    assert win._graph_stale is True
