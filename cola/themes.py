@@ -91,6 +91,10 @@ class Theme:
         main_color = self.main_color
         color = qtutils.css_color(main_color)
         color_rgb = qtutils.rgb_css(color)
+        check_icon = icons.check_name()
+        dot_icon = icons.dot_name()
+        radio_size = defs.radio
+        radio_radius = defs.radio // 2
         self.is_palette_dark = self.is_dark
 
         if self.is_dark:
@@ -395,13 +399,16 @@ class Theme:
                 background-color: {darker};
             }}
             QCheckBox::indicator:checked {{
-                background-color: {darker};
+                background-color: {field};
+                image: url({check_icon});
             }}
             QCheckBox::indicator:checked:hover {{
                 background-color: {color_rgb};
+                image: url({check_icon});
             }}
             QCheckBox::indicator:checked:pressed {{
                 background-color: {field};
+                image: url({check_icon});
             }}
 
             /* radio checkbox */
@@ -410,8 +417,14 @@ class Theme:
                 margin: 4px;
             }}
             QRadioButton::indicator {{
-                height: 0.75em;
-                width: 0.75em;
+                background-color: {field};
+                border: 1px solid {darker};
+                border-radius: {radio_radius}px;
+                height: {radio_size}px;
+                width: {radio_size}px;
+            }}
+            QRadioButton::indicator:checked {{
+                image: url({dot_icon});
             }}
 
             /* progress bar */
