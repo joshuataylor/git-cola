@@ -9,6 +9,7 @@ from cola.models import dag
 from cola.widgets.dag import COMMIT_ROLE
 from cola.widgets.dag import GRAPH_PREV_ROW_ROLE
 from cola.widgets.dag import GRAPH_ROW_ROLE
+from cola.widgets.dag import Commit as GraphicsCommit
 from cola.widgets.dag import CommitTreeWidget
 from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
@@ -516,6 +517,21 @@ def test_add_commits_applies_graph_rows_per_chunk(qapp, app_context):
     assert prev_for_a.commit_oid == commit_b.oid
     prev_for_c = items[commit_c.oid].data(summary, GRAPH_PREV_ROW_ROLE)
     assert prev_for_c.commit_oid == commit_d.oid
+
+
+def test_graph_node_tooltip_is_built_lazily(qapp, app_context):
+    """A graph node's tooltip is only built on demand, and only once"""
+    commit = _commit_for_graph(app_context, 'a' * 40)
+    item = GraphicsCommit(commit)
+    assert item.toolTip() == ''
+
+    item.ensure_tooltip()
+    tooltip = commit.oid[:12] + ': ' + commit.summary
+    assert item.toolTip() == tooltip
+    # Idempotent: the second call reuses the built tooltip.
+    commit.summary = 'changed'
+    item.ensure_tooltip()
+    assert item.toolTip() == tooltip
 
 
 def _make_lazy_graph_dag(app_context, visible):
