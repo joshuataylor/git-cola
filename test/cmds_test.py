@@ -342,3 +342,20 @@ def test_open_repo_reports_missing_repositories(app_context, tmp_path):
     assert details != 'stale error'
     assert str(tmp_path) in details
     assert os.path.samefile(app_context.git.worktree(), main_repo)
+
+
+def test_move_to_trash_resolves_send2trash_lazily():
+    """send2trash is only imported when the command is constructed
+
+    The module-level probe uses find_spec so that importing cola.cmds does
+    not load send2trash (and, on macOS, the PyObjC bridge behind it).
+    """
+    import importlib.util
+
+    available = importlib.util.find_spec('send2trash') is not None
+    assert cmds.MoveToTrash.AVAILABLE == available
+    if available:
+        from send2trash import send2trash
+
+        command = cmds.MoveToTrash(Mock(), [])
+        assert command.remover is send2trash
