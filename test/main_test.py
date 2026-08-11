@@ -70,3 +70,45 @@ def test_app_menu_actions_have_explicit_roles(main_view):
     assert main_view.preferences_action.menuRole() == action.PreferencesRole
     assert main_view.quit_action.menuRole() == action.QuitRole
     assert main_view.help_about_action.menuRole() == action.AboutRole
+
+
+def test_bookmarks_docks_start_without_widgets(main_view):
+    """The Favorites/Recent widgets are not constructed at startup
+
+    Both docks are hidden by default, so their widgets are built lazily on
+    the dock's first reveal instead of on the startup critical path.
+    """
+    assert main_view.bookmarkswidget is None
+    assert main_view.recentwidget is None
+    assert main_view.bookmarksdock.widget() is None
+    assert main_view.recentdock.widget() is None
+    # The copy overrides skip the missing trees but keep the others.
+    copy_widgets = main_view.edit_proxy.overrides['copy']
+    assert main_view.statuswidget.tree in copy_widgets
+
+
+def test_bookmarks_dock_builds_on_first_reveal(main_view):
+    """Revealing the Favorites dock builds and wires its widget once"""
+    main_view.bookmarksdock.visibilityChanged.emit(True)
+
+    widget = main_view.bookmarkswidget
+    assert widget is not None
+    assert main_view.bookmarksdock.widget() is widget
+    assert widget.tree in main_view.edit_proxy.overrides['copy']
+    assert widget.font() == main_view.font()
+
+    # A second reveal must not rebuild the widget.
+    main_view.bookmarksdock.visibilityChanged.emit(True)
+    assert main_view.bookmarksdock.widget() is widget
+
+
+def test_both_bookmarks_docks_build_when_revealed(main_view):
+    """Revealing both docks builds both widgets and connects them"""
+    main_view.bookmarksdock.visibilityChanged.emit(True)
+    main_view.recentdock.visibilityChanged.emit(True)
+
+    assert main_view.bookmarkswidget is not None
+    assert main_view.recentwidget is not None
+    copy_widgets = main_view.edit_proxy.overrides['copy']
+    assert main_view.bookmarkswidget.tree in copy_widgets
+    assert main_view.recentwidget.tree in copy_widgets
