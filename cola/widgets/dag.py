@@ -2868,7 +2868,9 @@ class Commit(QtWidgets.QGraphicsItem):
         self.setZValue(0)
         self.setFlag(selectable)
         self.setCursor(cursor)
-        self.update_tooltip()
+        # Tooltips are built lazily on hover (see GraphView.viewportEvent);
+        # building one per node up front is measurable on large histories.
+        self._tooltip_set = False
 
         if commit.tags:
             self.label = label = Label(commit)
@@ -2886,14 +2888,28 @@ class Commit(QtWidgets.QGraphicsItem):
         self.dragged = False
         self.edges = {}
 
-    def update_tooltip(self):
-        """Refresh the tooltip, which includes the signature status when known"""
+    def ensure_tooltip(self):
+        """Build the tooltip on first hover; later hovers reuse it"""
+        if self._tooltip_set:
+            return
         commit = self.commit
         tooltip = commit.oid[:12] + ': ' + commit.summary
         signature = dag.signature_tooltip(commit)
         if signature:
             tooltip += '\n' + signature
         self.setToolTip(tooltip)
+        self._tooltip_set = True
+
+    def update_tooltip(self):
+        """Refresh the tooltip, which includes the signature status when known
+
+        An unmaterialised tooltip needs no work: the first hover reads the
+        commit's current signature state anyway. Only a tooltip that has
+        already been built (and could be showing) is rebuilt eagerly.
+        """
+        if self._tooltip_set:
+            self._tooltip_set = False
+            self.ensure_tooltip()
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
@@ -3798,6 +3814,17 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         return positions
 
     # Qt overrides
+    def viewportEvent(self, event):
+        # Tooltips are built lazily: materialise the hovered node's tooltip
+        # just before Qt's stock help-event machinery shows it. items() (not
+        # itemAt()) copes with a Label or Edge overlapping the node.
+        if event.type() == QtCore.QEvent.ToolTip:
+            for item in self.items(event.pos()):
+                if isinstance(item, Commit):
+                    item.ensure_tooltip()
+                    break
+        return super().viewportEvent(event)
+
     def contextMenuEvent(self, event):
         self.context_menu_event(event)
 
