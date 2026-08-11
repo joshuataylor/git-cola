@@ -30,19 +30,23 @@ On a Debian/Ubuntu system you can install these modules using apt:
     )
     sys.exit(1)  # core.EXIT_FAILURE
 
+import qtpy
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
-try:
-    # Qt 5.12 / PyQt 5.13 is unable to use QtWebEngineWidgets unless it is
-    # imported before QApplication is constructed.
-    from qtpy import QtWebEngineWidgets  # noqa
-except ImportError:
-    # QtWebEngineWidgets / QtWebKit is not available -- no big deal.
-    pass
+if qtpy.QT5:
+    try:
+        # Qt 5.12 / PyQt 5.13 is unable to use QtWebEngineWidgets unless it is
+        # imported before QApplication is constructed. Qt 6 has no such
+        # restriction (about.py imports it on demand), so skip the import --
+        # QtWebEngine is a heavyweight module that would slow every startup.
+        from qtpy import QtWebEngineWidgets  # noqa
+    except ImportError:
+        # QtWebEngineWidgets / QtWebKit is not available -- no big deal.
+        pass
 
 
 # Import cola modules
