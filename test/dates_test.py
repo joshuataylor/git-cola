@@ -1,6 +1,8 @@
 """Tests for the cola.dates commit date formatting helpers"""
 
 import datetime
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from cola import dates
 
@@ -99,6 +101,42 @@ def test_format_timestamp_pretty_falls_through_when_old():
         timestamp, dates.DateMode.CUSTOM, 'yyyy-MM-dd HH:mm', True, now=NOW
     )
     assert actual == '2026-07-14 23:12'
+
+
+def _datetime_module_mock():
+    """A stand-in for the datetime module that counts fromtimestamp() calls"""
+    module_mock = MagicMock(wraps=datetime)
+    module_mock.datetime = MagicMock(wraps=datetime.datetime)
+    module_mock.datetime.fromtimestamp = MagicMock(
+        wraps=datetime.datetime.fromtimestamp
+    )
+    return module_mock
+
+
+def test_format_timestamp_git_mode_skips_the_datetime():
+    """The default git mode returns git's string without building a datetime"""
+    timestamp = timestamp_for(2026, 7, 14, 23, 12)
+    module_mock = _datetime_module_mock()
+    with patch.object(dates, 'datetime', module_mock):
+        actual = dates.format_timestamp(
+            timestamp, dates.DateMode.GIT, '', False, git_date='passthrough', now=NOW
+        )
+    assert actual == 'passthrough'
+    module_mock.datetime.fromtimestamp.assert_not_called()
+
+
+def test_format_timestamp_other_modes_build_the_datetime():
+    """Pretty and non-git modes still convert the timestamp"""
+    timestamp = timestamp_for(2026, 7, 14, 23, 12)
+    module_mock = _datetime_module_mock()
+    with patch.object(dates, 'datetime', module_mock):
+        dates.format_timestamp(
+            timestamp, dates.DateMode.GIT, '', True, git_date='x', now=NOW
+        )
+        dates.format_timestamp(
+            timestamp, dates.DateMode.CUSTOM, 'yyyy-MM-dd', False, now=NOW
+        )
+    assert module_mock.datetime.fromtimestamp.call_count == 2
 
 
 def test_date_modes():
