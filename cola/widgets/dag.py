@@ -2,6 +2,7 @@ from __future__ import annotations
 import collections
 import datetime
 import enum
+import functools
 import itertools
 import math
 from functools import partial
@@ -776,8 +777,20 @@ def _parse_ref(ref: str) -> tuple[str, str | None, str | None, RefType]:
     return ref, ref, None, RefType.OTHER
 
 
-def _prepare_labels(refs: list[str]) -> list[tuple[str, str, str | None]]:
-    """Decide which labels to condense and return (ref, display_text, condensed_text).
+def _prepare_labels(refs: list[str]) -> tuple[tuple[str, str, str | None], ...]:
+    """Decide which labels to condense and return (ref, display_text, condensed_text)
+
+    A commit's refs are immutable once displayed, but this runs on every paint,
+    size hint and hit test of a labelled row, so the result is memoised.
+    """
+    return _prepare_labels_cached(tuple(refs))
+
+
+@functools.lru_cache(maxsize=512)
+def _prepare_labels_cached(
+    refs: tuple[str, ...],
+) -> tuple[tuple[str, str, str | None], ...]:
+    """Group, sort and condense a commit's ref labels.
 
     Refs are grouped into groups with the same branch name. Local branch (if any)
     is placed last. All refs within the group except the last are condensed to
@@ -814,7 +827,7 @@ def _prepare_labels(refs: list[str]) -> list[tuple[str, str, str | None]]:
         for i, (ref, _, display, condensed) in enumerate(remotes):
             result.append((ref, display, condensed if i < condense_count else None))
 
-    return result
+    return tuple(result)
 
 
 class GraphDelegate(QtWidgets.QStyledItemDelegate):
