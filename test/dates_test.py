@@ -139,5 +139,9 @@ def test_format_timestamp_other_modes_build_the_datetime():
     assert module_mock.datetime.fromtimestamp.call_count == 2
 
 
+def test_system_locale_is_cached():
+    assert dates._system_locale() is dates._system_locale()
+
+
 def test_date_modes():
     assert dates.date_modes() == ['git', 'system', 'custom']
