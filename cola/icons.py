@@ -99,8 +99,14 @@ def from_theme(name: str, fallback: str | None = None) -> QtGui.QIcon:
     return icon(fallback or name)
 
 
+@decorators.memoize
 def basename_from_filename(filename: str) -> str:
-    """Returns an icon name based on the filename"""
+    """Returns an icon name based on the filename
+
+    Memoized because the status tree looks this up for every modified and
+    unmerged file on every refresh, and the mimetype guess is pure -- a given
+    filename always maps to the same icon name.
+    """
     mimetype = core.guess_mimetype(filename)
     if mimetype is not None:
         mimetype = mimetype.lower()
