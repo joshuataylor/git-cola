@@ -257,3 +257,39 @@ def test_darwin_plist_associates_folders_with_modern_utis():
     document_types = plist['CFBundleDocumentTypes']
     content_types = document_types[0]['LSItemContentTypes']
     assert 'public.folder' in content_types
+
+
+def test_set_process_title_imports_lazily(monkeypatch):
+    """The setproctitle import happens inside the call, not at module scope
+
+    The title is applied after the UI is up, so startup does not pay for the
+    import; a missing package degrades to a no-op.
+    """
+    calls = []
+    fake = types.ModuleType('setproctitle')
+    fake.setproctitle = calls.append
+    monkeypatch.setitem(sys.modules, 'setproctitle', fake)
+    monkeypatch.setattr(sys, 'argv', ['/usr/local/bin/git-cola'])
+
+    app.set_process_title()
+
+    assert calls == ['/usr/local/bin/git-cola']
+
+
+def test_set_process_title_falls_back_for_unhelpful_argv(monkeypatch):
+    """Interpreter-style argv values fall back to the plain app name"""
+    calls = []
+    fake = types.ModuleType('setproctitle')
+    fake.setproctitle = calls.append
+    monkeypatch.setitem(sys.modules, 'setproctitle', fake)
+    monkeypatch.setattr(sys, 'argv', ['-c'])
+
+    app.set_process_title()
+
+    assert calls == ['git-cola']
+
+
+def test_set_process_title_survives_missing_package(monkeypatch):
+    """A missing setproctitle package is a silent no-op"""
+    monkeypatch.setitem(sys.modules, 'setproctitle', None)
+    app.set_process_title()
