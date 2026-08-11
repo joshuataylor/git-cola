@@ -437,3 +437,120 @@ def test_head_color_overrides_merge():
         result,
         [GraphRowColor.HEAD, GraphRowColor.NORMAL, GraphRowColor.NORMAL],
     )
+
+
+# A copy of the pre-optimisation algorithm, kept as an oracle so the
+# lane-index/free-slot rewrite in build_graph can be checked for exact
+# equivalence across many random DAGs.
+def _reference_graph(commits, head_oid=None):
+    active_lanes = []
+    color_map = {}
+    next_color = 0
+    rows = []
+    max_columns = 0
+    all_oids = {c[0] for c in commits}
+    for oid, parent_oids in reversed(commits):
+        terminal_commit = False
+        try:
+            commit_column = active_lanes.index(oid)
+        except ValueError:
+            if parent_oids and not all_oids.intersection(parent_oids):
+                terminal_commit = True
+                active_lanes = [None]
+                commit_column = 0
+            else:
+                commit_column = len(active_lanes)
+                active_lanes.append(oid)
+        commit_color = color_map.get(oid, None)
+        if commit_color is None:
+            commit_color = next_color
+            next_color += 1
+        else:
+            color_map.pop(oid)
+        edges = []
+        for i, lane_oid in enumerate(active_lanes):
+            if lane_oid is not None and lane_oid != oid:
+                edges.append((i, i, color_map[lane_oid]))
+        if parent_oids and not terminal_commit:
+            for i, parent_oid in enumerate(parent_oids):
+                parent_color = color_map.get(parent_oid, None)
+                if parent_color is None:
+                    if i == 0:
+                        parent_color = commit_color
+                    else:
+                        parent_color = next_color
+                        next_color += 1
+                    color_map[parent_oid] = parent_color
+                try:
+                    parent_col = active_lanes.index(parent_oid)
+                    if i == 0:
+                        active_lanes[commit_column] = None
+                except ValueError:
+                    if i == 0:
+                        active_lanes[commit_column] = parent_oid
+                        parent_col = commit_column
+                    elif None in active_lanes:
+                        parent_col = active_lanes.index(None)
+                        active_lanes[parent_col] = parent_oid
+                    else:
+                        parent_col = len(active_lanes)
+                        active_lanes.append(parent_oid)
+                edges.append((commit_column, parent_col, parent_color))
+        else:
+            active_lanes[commit_column] = None
+        max_columns = max(max_columns, len(active_lanes))
+        while active_lanes and active_lanes[-1] is None:
+            active_lanes.pop()
+        if head_oid is not None and oid == head_oid:
+            color = GraphRowColor.HEAD
+        elif len(parent_oids) > 1:
+            color = GraphRowColor.MERGE
+        else:
+            color = GraphRowColor.NORMAL
+        rows.append((oid, commit_column, tuple(edges), color))
+    return rows, max_columns
+
+
+def _actual_graph(result):
+    rows = [
+        (
+            r.commit_oid,
+            r.commit_column,
+            tuple(
+                (e.from_column, e.to_column, e.color_index) for e in r.edges_to_parent
+            ),
+            r.color,
+        )
+        for r in result.rows
+    ]
+    return rows, result.max_columns
+
+
+def test_build_graph_matches_reference_on_random_dags():
+    """The optimised build_graph matches the original algorithm exactly.
+
+    Random topo-ordered DAGs -- including merges, octopus merges and terminal
+    commits whose parents fall outside the loaded set -- are fed to both, and
+    every row, edge, colour and the column count must agree.
+    """
+    import random
+
+    rng = random.Random(20240611)
+    for _ in range(400):
+        n = rng.randint(0, 30)
+        commits = []
+        oids = []
+        for i in range(n):
+            oid = f'c{i}'
+            if oids and rng.random() < 0.15:
+                # Parents outside the loaded history -> a terminal commit.
+                parents = [f'ext{i}']
+            else:
+                max_parents = min(3, len(oids))
+                k = rng.randint(0, max_parents)
+                parents = rng.sample(oids, k) if k else []
+            commits.append((oid, parents))
+            oids.append(oid)
+        head = rng.choice(oids) if oids and rng.random() < 0.5 else None
+        result = build_graph(commits, head_oid=head)
+        assert _actual_graph(result) == _reference_graph(commits, head_oid=head)
