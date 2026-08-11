@@ -2618,7 +2618,9 @@ class ReaderThread(QtCore.QThread):
     def run(self):
         """Gather commits and emit them to the main thread"""
         context = self.context
-        repo = dag.RepoReader(context, self.params)
+        repo = dag.RepoReader(
+            context, self.params, should_interrupt=self.isInterruptionRequested
+        )
         repo.reset()
         self.begin.emit()
 

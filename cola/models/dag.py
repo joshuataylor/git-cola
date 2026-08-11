@@ -2,7 +2,9 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import subprocess
 from collections.abc import Iterator
+from typing import Callable
 
 from .. import core
 from .. import utils
@@ -425,12 +427,22 @@ class Commit:
 
 
 class RepoReader:
-    def __init__(self, context, params: DAG, allow_git_init: bool = True) -> None:
+    def __init__(
+        self,
+        context,
+        params: DAG,
+        allow_git_init: bool = True,
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> None:
         self.context = context
         self.params = params
         self.git = context.git
         self.returncode = 0
         self._allow_git_init = allow_git_init
+        # Polled while streaming "git log" so a cancelled reader (the DAG window
+        # closed) can stop the subprocess promptly. Defaults to never-interrupt
+        # for the synchronous callers.
+        self._should_interrupt = should_interrupt or (lambda: False)
         self._objects: dict[str, Commit] = {}
         self._cmd = [
             'git',
@@ -480,11 +492,12 @@ class RepoReader:
         # When _allow_git_init is True then we detect the "git init" state
         # by checking whether any local branches currently exist.
         if not self._allow_git_init or self.context.model.local_branches:
-            status, out, _ = core.run_command(cmd)
+            status, log_entries = self._read_log(cmd)
             oid_len = self.context.model.oid_len
-            for log_entry in reversed(out.splitlines()):
+            # "git log" emits newest-first; reverse to yield oldest-first.
+            for log_entry in reversed(log_entries):
                 if not log_entry:
-                    break
+                    continue
                 oid = log_entry[:oid_len]
                 try:
                     commit = self._objects[oid]
@@ -502,6 +515,33 @@ class RepoReader:
         self._top_commit = commit
         self._cached = True
         self.returncode = status
+
+    def _read_log(self, cmd: list[str]) -> tuple[int, list[str]]:
+        """Run the log command, reading stdout a line at a time
+
+        Streaming keeps peak memory below buffering the whole output as one
+        string, and lets a cancelled reader stop "git log" promptly instead of
+        waiting for a long history to finish. stderr is discarded (as before);
+        the status character conveys any problem. Returns (status, log_entries)
+        with the entries in git's newest-first order.
+        """
+        try:
+            proc = core.start_command(cmd, stderr=subprocess.DEVNULL)
+        except OSError:
+            return 1, []
+        log_entries: list[str] = []
+        stdout = proc.stdout
+        while True:
+            line = core.readline(stdout)
+            if not line:
+                break
+            if self._should_interrupt():
+                proc.terminate()
+                core.wait(proc)
+                return proc.returncode, []
+            log_entries.append(line.rstrip('\r\n'))
+        status = core.wait(proc)
+        return status, log_entries
 
     def get_worktree_commits(self) -> tuple[Commit | None, Commit | None]:
         """A Commit object that represents unstaged modified changes in a worktree"""
