@@ -6,7 +6,11 @@ from unittest.mock import patch
 import pytest
 
 from cola.models import dag
+from cola.widgets.dag import COMMIT_ROLE
+from cola.widgets.dag import GRAPH_PREV_ROW_ROLE
+from cola.widgets.dag import GRAPH_ROW_ROLE
 from cola.widgets.dag import CommitTreeWidget
+from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
 from cola.widgets.filelist import FileTreeWidgetItem
@@ -644,6 +648,56 @@ def test_apply_state_without_column_keys(qapp, app_context):
     visible = [column.key for _, column in tree.visible_columns()]
     assert visible == ['summary', 'author', 'date']
     assert tree.columnWidth(0) == 100
+
+
+def _commit_for_graph(app_context, oid, parents=None):
+    """Build a minimal parsed commit for graph/tree tests"""
+    commit = dag.Commit(app_context, oid=oid)
+    commit.summary = 'summary for ' + oid[:7]
+    commit.author = 'David Aguilar'
+    commit.authdate = 'Fri Nov 30 00:03:28 2007 -0800'
+    commit.timestamp = 1196409808
+    commit.parsed = True
+    if parents:
+        commit.parents = parents
+        for parent in parents:
+            parent.children.append(commit)
+    return commit
+
+
+def test_add_commits_applies_graph_rows_per_chunk(qapp, app_context):
+    """Graph rows attach to each chunk's items and stay batch-local"""
+    tree = CommitTreeWidget(app_context, None)
+    commit_a = _commit_for_graph(app_context, 'a' * 40)
+    commit_b = _commit_for_graph(app_context, 'b' * 40, parents=[commit_a])
+    commit_c = _commit_for_graph(app_context, 'c' * 40, parents=[commit_b])
+    commit_d = _commit_for_graph(app_context, 'd' * 40, parents=[commit_c])
+    # The reader emits oldest-first chunks.
+    tree.add_commits([commit_a, commit_b])
+    tree.add_commits([commit_c, commit_d])
+
+    items = {}
+    order = []
+    for idx in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(idx)
+        items[item.commit.oid] = item
+        order.append(item.commit.oid)
+    # Newest-first display order.
+    assert order == [commit.oid for commit in (commit_d, commit_c, commit_b, commit_a)]
+
+    summary = CommitTreeWidgetItem.SUMMARY
+    for commit in (commit_a, commit_b, commit_c, commit_d):
+        item = items[commit.oid]
+        row = item.data(summary, GRAPH_ROW_ROLE)
+        assert row.commit_oid == commit.oid
+        assert item.data(summary, COMMIT_ROLE) is commit
+    # The previous row is batch-local: the first row of each chunk has none.
+    assert items[commit_b.oid].data(summary, GRAPH_PREV_ROW_ROLE) is None
+    assert items[commit_d.oid].data(summary, GRAPH_PREV_ROW_ROLE) is None
+    prev_for_a = items[commit_a.oid].data(summary, GRAPH_PREV_ROW_ROLE)
+    assert prev_for_a.commit_oid == commit_b.oid
+    prev_for_c = items[commit_c.oid].data(summary, GRAPH_PREV_ROW_ROLE)
+    assert prev_for_c.commit_oid == commit_d.oid
 
 
 def _make_lazy_graph_dag(app_context, visible):
