@@ -291,3 +291,28 @@ def test_oid_diff_range_uses_git_diff_by_default(app_context):
 
     assert 'ext_diff' not in captured['opts']
     assert '_add_env' not in captured['opts']
+
+
+def test_parse_raw_diff_multiple_records():
+    """_parse_raw_diff walks NUL-delimited (info, path) pairs, incl. submodules"""
+    nul = '\0'
+    out = nul.join([
+        ':100644 100644 aaaaaaa bbbbbbb M',
+        'file1.py',
+        ':000000 100644 0000000 ccccccc A',
+        'new.txt',
+        ':160000 160000 ddddddd eeeeeee M',
+        'submod',
+        '',  # git terminates every path with a trailing NUL
+    ])
+    result = list(gitcmds._parse_raw_diff(out))
+    assert result == [
+        ('file1.py', 'M', False),
+        ('new.txt', 'A', False),
+        ('submod', 'M', True),
+    ]
+
+
+def test_parse_raw_diff_empty():
+    """No output yields no records rather than raising"""
+    assert list(gitcmds._parse_raw_diff('')) == []
