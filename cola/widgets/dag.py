@@ -2256,6 +2256,9 @@ class GitDAG(standard.MainWindow):
         # Drop cached diff text; an external diff command or encoding change
         # could otherwise leave a stale diff on display after a reload.
         self.diffwidget.clear_diff_cache()
+        # The reloaded history may change what a cached commit's file list
+        # means (e.g. after an amend), so drop the file-list cache too.
+        self.filewidget.clear_files_cache()
         # The graph must be rebuilt from the incoming commits. Bumping the build
         # id invalidates any deferred build still queued from a prior pass.
         self._graph_stale = True
