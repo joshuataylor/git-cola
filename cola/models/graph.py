@@ -40,6 +40,11 @@ def build_graph(
     Commits are received in topo order from RepoReader (oldest first).
     """
     active_lanes: list[str | None] = []
+    # oid -> its column in active_lanes, and the set of columns currently held
+    # by a None placeholder. Both mirror active_lanes so the per-commit lane
+    # lookups below avoid an O(lanes) list.index()/`in` scan on wide histories.
+    lane_index: dict[str, int] = {}
+    free_slots: set[int] = set()
     color_map: dict[str, int] = {}
     next_color = 0
     rows: list[GraphRow] = []
@@ -52,16 +57,18 @@ def build_graph(
         # Is this a terminal commit without any parents?
         terminal_commit = False
         # Find the commit in active_lanes or allocate a new lane.
-        try:
-            commit_column = active_lanes.index(oid)
-        except ValueError:
+        commit_column = lane_index.get(oid)
+        if commit_column is None:
             if parent_oids and not all_oids.intersection(parent_oids):
                 terminal_commit = True
                 active_lanes = [None]
+                lane_index = {}
+                free_slots = {0}
                 commit_column = 0
             else:
                 commit_column = len(active_lanes)
                 active_lanes.append(oid)
+                lane_index[oid] = commit_column
 
         # Assign a color for this commit's lane.
         commit_color = color_map.get(oid, None)
@@ -99,24 +106,30 @@ def build_graph(
                         next_color += 1
                     color_map[parent_oid] = parent_color
 
-                try:
-                    parent_col = active_lanes.index(parent_oid)
+                parent_col = lane_index.get(parent_oid)
+                if parent_col is not None:
                     if i == 0:
                         # First parent means commit no longer uses its column
                         active_lanes[commit_column] = None
-                except ValueError:
-                    if i == 0:
-                        # First parent takes the commit's lane.
-                        active_lanes[commit_column] = parent_oid
-                        parent_col = commit_column
-                    elif None in active_lanes:
-                        # Try to reuse a None slot
-                        parent_col = active_lanes.index(None)
-                        active_lanes[parent_col] = parent_oid
-                    else:
-                        # Append new
-                        parent_col = len(active_lanes)
-                        active_lanes.append(parent_oid)
+                        del lane_index[oid]
+                        free_slots.add(commit_column)
+                elif i == 0:
+                    # First parent takes the commit's lane.
+                    active_lanes[commit_column] = parent_oid
+                    del lane_index[oid]
+                    lane_index[parent_oid] = commit_column
+                    parent_col = commit_column
+                elif free_slots:
+                    # Try to reuse a None slot (the lowest, as index(None) did).
+                    parent_col = min(free_slots)
+                    active_lanes[parent_col] = parent_oid
+                    lane_index[parent_oid] = parent_col
+                    free_slots.discard(parent_col)
+                else:
+                    # Append new
+                    parent_col = len(active_lanes)
+                    active_lanes.append(parent_oid)
+                    lane_index[parent_oid] = parent_col
 
                 edges.append(
                     EdgeSegment(
@@ -128,11 +141,14 @@ def build_graph(
         else:
             # Root commit - remove its lane.
             active_lanes[commit_column] = None
+            lane_index.pop(oid, None)
+            free_slots.add(commit_column)
 
         max_columns = max(max_columns, len(active_lanes))
 
         # Trim trailing None slots.
         while active_lanes and active_lanes[-1] is None:
+            free_slots.discard(len(active_lanes) - 1)
             active_lanes.pop()
 
         if head_oid is not None and oid == head_oid:
