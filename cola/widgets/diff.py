@@ -122,9 +122,24 @@ class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
         self._configure_colors(context, qtutils.current_palette())
         self.rehighlight()
 
+    def clear_intraline_spans(self):
+        """Drop intra-line spans without re-highlighting
+
+        Called before a new document is set so the fresh highlight pass does
+        not apply the previous diff's spans by block number. The subsequent
+        setPlainText triggers the highlight, so no rehighlight is needed here.
+        """
+        self._intraline_spans = {}
+
     def set_intraline_spans(self, spans):
         """Set the per-line spans used for intra-line diff highlighting."""
-        self._intraline_spans = spans or {}
+        spans = spans or {}
+        if spans == self._intraline_spans:
+            # Unchanged: the current highlight already reflects these spans, so
+            # a full-document rehighlight would be wasted work. This skips the
+            # redundant second pass on every diff that has no intra-line spans.
+            return
+        self._intraline_spans = spans
         self.rehighlight()
 
     def set_enabled(self, enabled):
@@ -385,6 +400,11 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         # Recover from a prior ANSI render (set_ansi_diff disables these).
         self.highlighter.set_enabled(True)
+        # Drop the previous diff's intra-line spans before the new document is
+        # set, so setPlainText's highlight pass starts clean. update_intraline_
+        # diff_spans() below then re-highlights only when the new diff actually
+        # has spans, instead of every diff paying for a second full pass.
+        self.highlighter.clear_intraline_spans()
 
         lines = self.diff_lines.parse(diff)
         if self.numbers:
