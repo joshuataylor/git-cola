@@ -44,12 +44,6 @@ except ImportError:
     # QtWebEngineWidgets / QtWebKit is not available -- no big deal.
     pass
 
-try:
-    # Setting the process title is optional and enabled when the
-    # "setproctitle" package is installed.
-    import setproctitle
-except ImportError:
-    setproctitle = None
 
 # Import cola modules
 from . import cmd
@@ -859,18 +853,31 @@ def startup_message() -> None:
         Interaction.log(msg2)
 
 
+def set_process_title() -> None:
+    """Set the process title so process listings show git-cola, not python
+
+    The title is the launch path (e.g. the path to the "git-cola"
+    executable); when that is unhelpful, e.g. when running via "python -c" or
+    an interactive interpreter, fall back to "git-cola". This is an optional
+    feature that depends on the "setproctitle" package being available.
+
+    This must run before Qt initialises: retitling the process after it has
+    registered with LaunchServices makes macOS reclassify the app as a
+    UIElement, which removes it from the Cmd-Tab application switcher.
+    """
+    try:
+        import setproctitle
+    except ImportError:
+        return
+    title = sys.argv[0] or 'git-cola'
+    if os.path.basename(title).startswith('-'):
+        title = 'git-cola'
+    setproctitle.setproctitle(title)
+
+
 def initialize(socket: server.SocketClient | None = None) -> str:
     """System-level initialization"""
-    # Set the process title so that the launch path (e.g. the path to the
-    # "git-cola" executable) is shown instead of "python" in process listings.
-    # This is an optional feature that depends on the "setproctitle" package
-    # being available.  When the launch path is unhelpful, e.g. when running
-    # via "python -c" or an interactive interpreter, fall back to "git-cola".
-    if setproctitle is not None:
-        title = sys.argv[0] or 'git-cola'
-        if os.path.basename(title).startswith('-'):
-            title = 'git-cola'
-        setproctitle.setproctitle(title)
+    set_process_title()
 
     # We support ~/.config/git-cola/git-bindir on Windows for configuring
     # a custom location for finding the "git" executable.
