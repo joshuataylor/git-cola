@@ -66,13 +66,27 @@ def dag_context(app_context):
     return DAGTestData(app_context)
 
 
+def _mock_core_git_log(core, text, status=0):
+    """Configure a mocked cola.models.dag.core to stream `text` like git log.
+
+    RepoReader reads the log a line at a time via start_command/readline/wait,
+    so the mock feeds each line back in turn and then an empty string at EOF.
+    """
+    proc = MagicMock()
+    proc.stdout = MagicMock()
+    proc.returncode = status
+    core.start_command.return_value = proc
+    core.readline.side_effect = [line + '\n' for line in text.split('\n')] + ['']
+    core.wait.return_value = status
+
+
 @patch('cola.models.dag.core')
 def test_repo_reader(core, dag_context):
     commit_files()
     dag_context.context.model.update_status()
     expect = len(LOG_LINES)
     actual = 0
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
     for idx, _ in enumerate(dag_context.reader.get()):
         actual += 1
 
@@ -90,7 +104,7 @@ def test_repo_reader_order(core, dag_context):
         'f4fb8fd5baaa55d9b41faca79be289bb4407281e',
         '23e7eab4ba2c94e3155f5d261c693ccac1342eb9',
     ]
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
     for idx, commit in enumerate(dag_context.reader.get()):
         assert commits[idx] == commit.oid
 
@@ -106,7 +120,7 @@ def test_repo_reader_parents(core, dag_context):
         ['e3f5a2d0248de6197d6e0e63c901810b8a9af2f8'],
         ['f4fb8fd5baaa55d9b41faca79be289bb4407281e'],
     ]
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
     for idx, commit in enumerate(dag_context.reader.get()):
         assert parents[idx] == [p.oid for p in commit.parents]
 
@@ -123,7 +137,7 @@ def test_repo_reader_timestamps(core, dag_context):
         1196766896,
         1196996360,
     ]
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
     for idx, commit in enumerate(dag_context.reader.get()):
         assert timestamps[idx] == commit.timestamp
         assert commit.authdate.endswith('2007 -0800')
@@ -134,13 +148,13 @@ def test_repo_reader_contract(core, dag_context):
     commit_files()
     dag_context.context.model.update_status()
     core.exists.return_value = True
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
 
     for idx, _ in enumerate(dag_context.reader.get()):
         pass
 
-    core.run_command.assert_called()
-    call_args = core.run_command.call_args
+    core.start_command.assert_called()
+    call_args = core.start_command.call_args
 
     assert 'log.abbrevCommit=false' in call_args[0][0]
     assert 'log.showSignature=false' in call_args[0][0]
@@ -155,7 +169,7 @@ def test_repo_reader_never_verifies_signatures(core, dag_context):
     """
     commit_files()
     dag_context.context.model.update_status()
-    core.run_command.return_value = (0, LOG_TEXT, '')
+    _mock_core_git_log(core, LOG_TEXT)
     commits = list(dag_context.reader.get())
 
     assert commits
@@ -164,6 +178,25 @@ def test_repo_reader_never_verifies_signatures(core, dag_context):
         assert commit.signature == ''
         assert dag.signature_severity(commit) == dag.SignatureStatus.NONE
         assert dag.signature_tooltip(commit) == ''
+
+
+@patch('cola.models.dag.core')
+def test_repo_reader_stops_when_interrupted(core, dag_context):
+    """A cancelled reader terminates git instead of draining the whole log."""
+    commit_files()
+    dag_context.context.model.update_status()
+    proc = MagicMock()
+    proc.stdout = MagicMock()
+    proc.returncode = 0
+    core.start_command.return_value = proc
+    core.readline.side_effect = [line + '\n' for line in LOG_LINES] + ['']
+
+    # Interrupt as soon as the first line is read.
+    dag_context.reader._should_interrupt = lambda: True
+    commits = list(dag_context.reader.get())
+
+    assert commits == []
+    proc.terminate.assert_called_once()
 
 
 @patch('cola.models.dag.core')
