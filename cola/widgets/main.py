@@ -98,25 +98,18 @@ class MainView(standard.MainWindow):
         )
         self.statuswidget = self.statusdock.widget()
 
-        # "Switch Repository" widgets
-        self.bookmarksdock = create_dock(
-            'Favorites',
-            N_('Favorites'),
-            self,
-            func=lambda dock: bookmarks.bookmark(context, dock),
-        )
-        self.bookmarkswidget = self.bookmarksdock.widget()
+        # "Switch Repository" widgets. Hidden by default and moderately
+        # expensive to build, so their widgets are constructed lazily the
+        # first time their dock is revealed.
+        self.bookmarkswidget = None
+        self.recentwidget = None
+        self.bookmarksdock = create_dock('Favorites', N_('Favorites'), self)
         qtutils.hide_dock(self.bookmarksdock)
+        self._lazy_dock(self.bookmarksdock, self._build_bookmarks_widget)
 
-        self.recentdock = create_dock(
-            'Recent',
-            N_('Recent'),
-            self,
-            func=lambda dock: bookmarks.recent(context, dock),
-        )
-        self.recentwidget = self.recentdock.widget()
+        self.recentdock = create_dock('Recent', N_('Recent'), self)
         qtutils.hide_dock(self.recentdock)
-        self.bookmarkswidget.connect_to(self.recentwidget)
+        self._lazy_dock(self.recentdock, self._build_recent_widget)
 
         # "Branch" widgets
         self.branchdock = create_dock(
@@ -746,18 +739,7 @@ class MainView(standard.MainWindow):
             editor, editor.summary, editor.description
         )
 
-        copy_widgets = (
-            self,
-            editor.summary,
-            editor.description,
-            self.diffeditor,
-            self.bookmarkswidget.tree,
-            self.recentwidget.tree,
-            self.statuswidget.tree,
-        )
-        select_widgets = copy_widgets + (self.statuswidget.tree,)
-        edit_proxy.override('copy', copy_widgets)
-        edit_proxy.override('selectAll', select_widgets)
+        self._update_edit_proxy_overrides()
 
         edit_menu = self.edit_menu = add_menu(N_('&Edit'), self.menubar)
         undo = qtutils.add_action(edit_menu, N_('Undo'), edit_proxy.undo, hotkeys.UNDO)
@@ -1355,6 +1337,56 @@ class MainView(standard.MainWindow):
     def git_dag(self):
         self.dag = dag.git_dag(self.context, existing_view=self.dag)
 
+    def _lazy_dock(self, dock, builder):
+        """Build a hidden dock's widget the first time the dock is revealed"""
+
+        def build_on_reveal(visible):
+            if visible and dock.widget() is None:
+                dock.setWidget(builder(dock))
+
+        dock.visibilityChanged.connect(build_on_reveal)
+
+    def _build_bookmarks_widget(self, dock):
+        """Build the Favorites widget on first reveal"""
+        self.bookmarkswidget = widget = bookmarks.bookmark(self.context, dock)
+        self._lazy_bookmarks_widget_built(widget)
+        return widget
+
+    def _build_recent_widget(self, dock):
+        """Build the Recent widget on first reveal"""
+        self.recentwidget = widget = bookmarks.recent(self.context, dock)
+        self._lazy_bookmarks_widget_built(widget)
+        return widget
+
+    def _lazy_bookmarks_widget_built(self, widget):
+        """Wire up a lazily built Favorites/Recent widget"""
+        # Apply the current font: setFont() may have run before the widget
+        # existed, and skipped it.
+        widget.setFont(self.font())
+        # The two lists refresh each other's default-repository star; connect
+        # them once both exist.
+        if self.bookmarkswidget is not None and self.recentwidget is not None:
+            self.bookmarkswidget.connect_to(self.recentwidget)
+        self._update_edit_proxy_overrides()
+
+    def _update_edit_proxy_overrides(self):
+        """Register the copy/select-all targets that currently exist"""
+        editor = self.commiteditor
+        copy_widgets = [
+            self,
+            editor.summary,
+            editor.description,
+            self.diffeditor,
+        ]
+        for widget in (self.bookmarkswidget, self.recentwidget):
+            if widget is not None:
+                copy_widgets.append(widget.tree)
+        copy_widgets.append(self.statuswidget.tree)
+        copy_widgets = tuple(copy_widgets)
+        select_widgets = copy_widgets + (self.statuswidget.tree,)
+        self.edit_proxy.override('copy', copy_widgets)
+        self.edit_proxy.override('selectAll', select_widgets)
+
     # Qt overrides
     def setFont(self, font):
         """Forward setFont() to child widgets"""
@@ -1362,8 +1394,11 @@ class MainView(standard.MainWindow):
         self.statuswidget.setFont(font)
         self.branchwidget.setFont(font)
         self.submoduleswidget.setFont(font)
-        self.recentwidget.setFont(font)
-        self.bookmarkswidget.setFont(font)
+        # The Favorites/Recent widgets are built lazily and may not exist yet;
+        # _lazy_bookmarks_widget_built() applies the font when they are built.
+        for widget in (self.recentwidget, self.bookmarkswidget):
+            if widget is not None:
+                widget.setFont(font)
 
 
 class FocusProxy:
