@@ -6,15 +6,11 @@ import sys
 import types
 from collections.abc import Callable
 from fnmatch import fnmatch
+from importlib import util as importlib_util
 from io import StringIO
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
-
-try:
-    from send2trash import send2trash
-except ImportError:
-    send2trash = None
 
 from . import core
 from . import display
@@ -1660,10 +1656,15 @@ class Delete(RemoveFiles):
 class MoveToTrash(RemoveFiles):
     """Move files to the trash using send2trash"""
 
-    AVAILABLE = send2trash is not None
+    # Probe for send2trash without importing it: on macOS the import loads
+    # the whole PyObjC bridge (~50ms), which would otherwise be paid at
+    # startup for a feature that may never be used.
+    AVAILABLE = importlib_util.find_spec('send2trash') is not None
     UNDOABLE = False
 
     def __init__(self, context: ApplicationContext, filenames) -> None:
+        from send2trash import send2trash
+
         super().__init__(context, send2trash, filenames)
 
 
