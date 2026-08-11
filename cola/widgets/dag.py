@@ -1682,25 +1682,21 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.apply_graph_result(graph_result)
 
     def apply_graph_result(self, graph_result) -> None:
-        oid_to_index: dict[str, int] = {}
-        for i, row in enumerate(graph_result.rows):
-            oid_to_index[row.commit_oid] = i
-        rows = graph_result.rows
-        for i in range(self.topLevelItemCount()):
-            item = self.topLevelItem(i)
-            if item is None:
-                continue
-            row_idx = oid_to_index.get(item.commit.oid)
-            if row_idx is None:
-                continue
-            item.setData(CommitTreeWidgetItem.SUMMARY, GRAPH_ROW_ROLE, rows[row_idx])
-            item.setData(CommitTreeWidgetItem.SUMMARY, COMMIT_ROLE, item.commit)
-            if row_idx > 0:
-                item.setData(
-                    CommitTreeWidgetItem.SUMMARY,
-                    GRAPH_PREV_ROW_ROLE,
-                    rows[row_idx - 1],
-                )
+        # Rows only describe the chunk that was just added, so resolve them
+        # through the oid->item map instead of rescanning every tree item.
+        prev_row = None
+        for row in graph_result.rows:
+            item = self.oidmap.get(row.commit_oid)
+            if item is not None:
+                item.setData(CommitTreeWidgetItem.SUMMARY, GRAPH_ROW_ROLE, row)
+                item.setData(CommitTreeWidgetItem.SUMMARY, COMMIT_ROLE, item.commit)
+                if prev_row is not None:
+                    item.setData(
+                        CommitTreeWidgetItem.SUMMARY,
+                        GRAPH_PREV_ROW_ROLE,
+                        prev_row,
+                    )
+            prev_row = row
         # Resize column to fit content after graph data is loaded.
         if self._column_init_state < ColumnInitState.GRAPH:
             self._column_init_state = ColumnInitState.GRAPH
