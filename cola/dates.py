@@ -47,6 +47,10 @@ def format_timestamp(timestamp, mode, custom_format, pretty, git_date='', now=No
     """
     if not timestamp:
         return git_date
+    # The default configuration (git mode, no pretty labels) returns git's own
+    # string untouched; this runs per commit at load, so skip the datetime.
+    if not pretty and mode == DateMode.GIT:
+        return git_date
     when = datetime.datetime.fromtimestamp(timestamp)
     if pretty:
         relative = relative_date(when, now=now)
