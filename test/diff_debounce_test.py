@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cola.models import dag
 from cola.widgets.diff import CommitDiffWidget
 from qtpy import QtWidgets
 
@@ -196,3 +197,71 @@ def test_set_diff_uses_plain_renderer_without_command(qapp, app_context):
 
     widget.diff.set_diff.assert_called_once_with(ansi_diff)
     widget.diff.set_ansi_diff.assert_not_called()
+
+
+def test_revisiting_commit_serves_diff_from_cache(qapp, app_context):
+    """Returning to a commit renders from cache without re-running git."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+    oid = 'a' * 40
+
+    # First visit: cache miss -> a diff task is started.
+    widget.commits_selected([_make_commit(oid)])
+    widget._load_pending_diff()
+    assert app_context.runtask.start.call_count == 1
+    # Simulate the background task returning its result.
+    widget.set_diff('diff A', widget._diff_token)
+    assert widget._diff_cache[(oid, None)] == 'diff A'
+
+    # Second visit: cache hit -> rendered synchronously, no new task.
+    widget.diff.set_diff.reset_mock()
+    widget.commits_selected([_make_commit(oid)])
+    widget._load_pending_diff()
+    assert app_context.runtask.start.call_count == 1  # unchanged
+    widget.diff.set_diff.assert_called_once_with('diff A')
+
+
+def test_pseudo_commit_diff_is_not_cached(qapp, app_context):
+    """Volatile WORKTREE/STAGE diffs are never cached."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+
+    widget.commits_selected([_make_commit(dag.WORKTREE)])
+    widget._load_pending_diff()
+    widget.set_diff('worktree diff', widget._diff_token)
+
+    assert (dag.WORKTREE, None) not in widget._diff_cache
+    assert len(widget._diff_cache) == 0
+
+
+def test_clear_diff_cache_empties_cache(qapp, app_context):
+    """clear_diff_cache drops all cached diffs (called when the DAG reloads)."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+    oid = 'a' * 40
+
+    widget.commits_selected([_make_commit(oid)])
+    widget._load_pending_diff()
+    widget.set_diff('diff A', widget._diff_token)
+    assert widget._diff_cache
+
+    widget.clear_diff_cache()
+    assert not widget._diff_cache
+
+
+def test_diff_cache_evicts_oldest_beyond_cap(qapp, app_context):
+    """The cache is bounded; the least-recently-used entry is evicted."""
+    widget = _make_widget(app_context)
+    widget.diff = MagicMock()
+    cap = widget._DIFF_CACHE_MAX
+
+    for i in range(cap + 5):
+        oid = f'{i:040d}'
+        widget._displayed_diff_key = (oid, None)
+        widget._diff_token += 1
+        widget.set_diff(f'diff {i}', widget._diff_token)
+
+    assert len(widget._diff_cache) == cap
+    # The earliest entries were evicted; the most recent are retained.
+    assert (f'{0:040d}', None) not in widget._diff_cache
+    assert (f'{cap + 4:040d}', None) in widget._diff_cache
