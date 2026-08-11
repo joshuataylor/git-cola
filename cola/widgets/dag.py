@@ -2529,7 +2529,9 @@ class Commit(QtWidgets.QGraphicsItem):
         self.setZValue(0)
         self.setFlag(selectable)
         self.setCursor(cursor)
-        self.setToolTip(commit.oid[:12] + ': ' + commit.summary)
+        # Tooltips are built lazily on hover (see GraphView.viewportEvent);
+        # building one per node up front is measurable on large histories.
+        self._tooltip_set = False
 
         if commit.tags:
             self.label = label = Label(commit)
@@ -2546,6 +2548,14 @@ class Commit(QtWidgets.QGraphicsItem):
         self.pressed = False
         self.dragged = False
         self.edges = {}
+
+    def ensure_tooltip(self):
+        """Build the tooltip on first hover; later hovers reuse it"""
+        if self._tooltip_set:
+            return
+        commit = self.commit
+        self.setToolTip(commit.oid[:12] + ': ' + commit.summary)
+        self._tooltip_set = True
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
@@ -3443,6 +3453,17 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         return positions
 
     # Qt overrides
+    def viewportEvent(self, event):
+        # Tooltips are built lazily: materialise the hovered node's tooltip
+        # just before Qt's stock help-event machinery shows it. items() (not
+        # itemAt()) copes with a Label or Edge overlapping the node.
+        if event.type() == QtCore.QEvent.ToolTip:
+            for item in self.items(event.pos()):
+                if isinstance(item, Commit):
+                    item.ensure_tooltip()
+                    break
+        return super().viewportEvent(event)
+
     def contextMenuEvent(self, event):
         self.context_menu_event(event)
 
