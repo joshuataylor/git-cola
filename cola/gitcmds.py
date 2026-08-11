@@ -787,8 +787,16 @@ def worktree_state(
 
 
 def _parse_raw_diff(out: TextType) -> Iterator[tuple[str, str, bool]]:
-    while out:
-        info, path, out = out.split('\0', 2)
+    # "git diff --raw -z" emits alternating info and path fields, each
+    # terminated by a NUL, so a single split yields [info, path, info, path,
+    # ..., ''] (the trailing NUL leaves an empty final field). Walking the
+    # fields in pairs is linear; the previous repeated `out.split('\0', 2)`
+    # copied the whole remaining buffer on every record, which is quadratic in
+    # the number of changed files.
+    fields = out.split('\0')
+    for i in range(0, len(fields) - 1, 2):
+        info = fields[i]
+        path = fields[i + 1]
         status = info[-1]
         is_submodule = '160000' in info[1:14]
         yield (path, status, is_submodule)
