@@ -9,6 +9,7 @@ from cola.models import dag
 from cola.widgets.dag import COMMIT_ROLE
 from cola.widgets.dag import GRAPH_PREV_ROW_ROLE
 from cola.widgets.dag import GRAPH_ROW_ROLE
+from cola.widgets.dag import Commit as GraphicsCommit
 from cola.widgets.dag import CommitTreeWidget
 from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
@@ -698,6 +699,40 @@ def test_add_commits_applies_graph_rows_per_chunk(qapp, app_context):
     assert prev_for_a.commit_oid == commit_b.oid
     prev_for_c = items[commit_c.oid].data(summary, GRAPH_PREV_ROW_ROLE)
     assert prev_for_c.commit_oid == commit_d.oid
+
+
+def test_graph_node_tooltip_is_built_lazily(qapp, app_context):
+    """A graph node's tooltip is only built on demand, and only once"""
+    commit = _commit_for_graph(app_context, 'a' * 40)
+    with patch.object(dag, 'signature_tooltip', return_value='') as signature_mock:
+        item = GraphicsCommit(commit)
+        assert item.toolTip() == ''
+        signature_mock.assert_not_called()
+
+        item.ensure_tooltip()
+        assert item.toolTip() == commit.oid[:12] + ': ' + commit.summary
+        item.ensure_tooltip()
+        # Idempotent: the second call reused the built tooltip.
+        assert signature_mock.call_count == 1
+
+
+def test_graph_node_tooltip_refreshes_only_after_materialisation(qapp, app_context):
+    """Signature updates rebuild only tooltips that were already built"""
+    commit = _commit_for_graph(app_context, 'a' * 40)
+    signatures = ['', 'Signature: Good']
+    with patch.object(dag, 'signature_tooltip', side_effect=signatures):
+        item = GraphicsCommit(commit)
+        # A signature update before any hover leaves the tooltip unbuilt; the
+        # first hover reads the current signature state anyway.
+        item.update_tooltip()
+        assert item.toolTip() == ''
+
+        item.ensure_tooltip()
+        base = commit.oid[:12] + ': ' + commit.summary
+        assert item.toolTip() == base
+        # Once built, a signature update refreshes the text immediately.
+        item.update_tooltip()
+        assert item.toolTip() == base + '\nSignature: Good'
 
 
 def _make_lazy_graph_dag(app_context, visible):
