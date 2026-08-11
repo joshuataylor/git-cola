@@ -192,13 +192,31 @@ class ViewerMixin:
         context = self.context
         self.with_oid(lambda oid: cmds.do(cmds.Revert, context, oid))
 
+    def selected_oids_for_copy(self):
+        """Return oids for every selected commit, for the clipboard Copy actions"""
+        items = self.selected_items()
+        selected_oids = [item.commit.oid for item in items]
+        clicked_oid = self.clicked.oid if self.clicked else None
+        if clicked_oid and clicked_oid not in selected_oids:
+            # Right-clicked a commit outside the current selection: copy just it.
+            oids = [clicked_oid]
+        else:
+            commits = sort_by_generation([item.commit for item in items])
+            oids = [commit.oid for commit in commits]
+        return [oid for oid in oids if oid not in (dag.STAGE, dag.WORKTREE)]
+
     def copy_to_clipboard(self):
-        """Copy the current commit object ID to the clipboard"""
-        self.with_oid(qtutils.set_clipboard)
+        """Copy the selected commit object IDs to the clipboard"""
+        oids = self.selected_oids_for_copy()
+        if oids:
+            qtutils.set_clipboard('\n'.join(oids))
 
     def copy_to_clipboard_short(self):
-        """Copy the current commit object ID to the clipboard"""
-        self.with_oid_short(qtutils.set_clipboard)
+        """Copy the abbreviated selected commit object IDs to the clipboard"""
+        oids = self.selected_oids_for_copy()
+        if oids:
+            abbrev = prefs.abbrev(self.context)
+            qtutils.set_clipboard('\n'.join(oid[:abbrev] for oid in oids))
 
     def checkout_branch(self):
         """Checkout the clicked/selected branch"""
