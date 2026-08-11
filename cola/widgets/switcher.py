@@ -22,9 +22,10 @@ def switcher_inner_view(
 
 
 def switcher_outer_view(context, entries, placeholder=None, parent=None):
-    dialog = SwitcherOuterView(context, entries, placeholder, parent)
-    dialog.show()
-    return dialog
+    # No show(): the outer view is embedded in a layout (see BookmarksWidget),
+    # so showing it here would briefly realise a top-level window that the
+    # layout immediately reparents. Visibility is managed by the parent.
+    return SwitcherOuterView(context, entries, placeholder, parent)
 
 
 def switcher_item(key, icon=None, name=None):

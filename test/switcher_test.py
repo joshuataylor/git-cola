@@ -1,6 +1,34 @@
 """Test Quick Switcher"""
+import sys
+from unittest.mock import MagicMock
+
+import pytest
+
 from cola import icons
 from cola.widgets import switcher
+from qtpy import QtGui
+from qtpy import QtWidgets
+
+
+@pytest.fixture(scope='module')
+def qapp():
+    """Provide a QApplication for the widget tests."""
+    instance = QtWidgets.QApplication.instance()
+    if instance is None:
+        instance = QtWidgets.QApplication(
+            sys.argv[:1] if sys.argv else ['git-cola-test']
+        )
+    yield instance
+
+
+def test_outer_view_is_not_shown_at_construction(qapp):
+    """The embedded quick switcher must not appear as a top-level window
+
+    The outer view is placed into its parent's layout, so showing it at
+    construction would briefly realise a stray native window at startup.
+    """
+    dialog = switcher.switcher_outer_view(MagicMock(), QtGui.QStandardItemModel())
+    assert not dialog.isVisible()
 
 
 def test_switcher_item_with_only_key():
