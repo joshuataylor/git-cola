@@ -14,6 +14,7 @@ from cola.widgets.dag import CommitTreeWidget
 from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
+from cola.widgets.dag import _prepare_labels_cached
 from cola.widgets.filelist import FileTreeWidgetItem
 from cola.widgets.filelist import FileWidget
 from qtpy import QtCore
@@ -183,14 +184,14 @@ def test_repo_reader_stops_when_interrupted(core, dag_context):
 
 def test_prepare_labels_single_remote_no_condensing():
     refs = ['remotes/origin/main']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/origin/main', 'origin/main', None),
     ]
 
 
 def test_prepare_labels_two_remotes_same_branch():
     refs = ['remotes/origin/main', 'remotes/myremote/main']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/myremote/main', 'myremote/main', 'myremote/\u2026'),
         ('remotes/origin/main', 'origin/main', None),
     ]
@@ -198,7 +199,7 @@ def test_prepare_labels_two_remotes_same_branch():
 
 def test_prepare_labels_three_remotes_same_branch():
     refs = ['remotes/origin/main', 'remotes/open/main', 'remotes/myremote/main']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/myremote/main', 'myremote/main', 'myremote/\u2026'),
         ('remotes/open/main', 'open/main', 'open/\u2026'),
         ('remotes/origin/main', 'origin/main', None),
@@ -213,7 +214,7 @@ def test_prepare_labels_mixed_refs():
         'heads/main',
         'tags/v1.0',
     ]
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('tags/v1.0', 'v1.0', None),
         ('remotes/myremote/main', 'myremote/main', 'myremote/\u2026'),
         ('remotes/origin/main', 'origin/main', 'origin/\u2026'),
@@ -223,7 +224,7 @@ def test_prepare_labels_mixed_refs():
 
 def test_prepare_labels_single_remote_with_local():
     refs = ['remotes/origin/main', 'heads/main']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/origin/main', 'origin/main', 'origin/\u2026'),
         ('heads/main', 'main', None),
     ]
@@ -231,7 +232,7 @@ def test_prepare_labels_single_remote_with_local():
 
 def test_prepare_labels_different_branch_names_no_condensing():
     refs = ['remotes/origin/main', 'remotes/origin/develop']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/origin/develop', 'origin/develop', None),
         ('remotes/origin/main', 'origin/main', None),
     ]
@@ -244,7 +245,7 @@ def test_prepare_labels_multiple_groups():
         'remotes/origin/feat',
         'remotes/myremote/feat',
     ]
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/myremote/feat', 'myremote/feat', 'myremote/\u2026'),
         ('remotes/origin/feat', 'origin/feat', None),
         ('remotes/myremote/main', 'myremote/main', 'myremote/\u2026'),
@@ -253,12 +254,24 @@ def test_prepare_labels_multiple_groups():
 
 
 def test_prepare_labels_empty():
-    assert _prepare_labels([]) == []
+    assert list(_prepare_labels([])) == []
+
+
+def test_prepare_labels_are_memoised():
+    """Repeated calls with the same refs are served from the cache"""
+    _prepare_labels_cached.cache_clear()
+    refs = ['remotes/origin/main', 'heads/main']
+    first = _prepare_labels(refs)
+    second = _prepare_labels(list(refs))
+    assert first == second
+    info = _prepare_labels_cached.cache_info()
+    assert info.hits == 1
+    assert info.misses == 1
 
 
 def test_prepare_labels_no_remotes():
     refs = ['HEAD', 'heads/main', 'tags/v1.0']
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('tags/v1.0', 'v1.0', None),
         ('heads/main', 'main', None),
     ]
@@ -272,7 +285,7 @@ def test_prepare_labels_two_groups_with_locals():
         'remotes/origin/feat',
         'heads/feat',
     ]
-    assert _prepare_labels(refs) == [
+    assert list(_prepare_labels(refs)) == [
         ('remotes/origin/feat', 'origin/feat', 'origin/\u2026'),
         ('heads/feat', 'feat', None),
         ('remotes/myremote/main', 'myremote/main', 'myremote/\u2026'),
