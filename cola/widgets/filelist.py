@@ -1,3 +1,7 @@
+import collections
+from functools import partial
+
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
@@ -11,6 +15,66 @@ from ..models import dag
 from .standard import TreeWidget
 
 
+def gather_files(context, key):
+    """Return the paths changed by a commit or commit range
+
+    ``key`` is the selection key built by ``FileWidget.commits_selected``:
+    ``('oid', oid)`` for a single commit or ``('range', start, end)`` for a
+    range. Runs on a background thread, so it only talks to git.
+    """
+    git = context.git
+    paths = []
+
+    if key[0] == 'range':
+        # Get a list of changed files for a commit range.
+        _, start_oid, end = key
+        start = start_oid + '~'
+        if end == dag.STAGE:
+            status, out, _ = git.diff(
+                start, cached=True, z=True, numstat=True, no_renames=True
+            )
+        elif end == dag.WORKTREE:
+            if start_oid == dag.STAGE:
+                status, out, _ = git.diff(z=True, numstat=True, no_renames=True)
+            else:
+                status, out, _ = git.diff(start, z=True, numstat=True, no_renames=True)
+        else:
+            status, out, _ = git.diff(start, end, z=True, numstat=True, no_renames=True)
+        if status == 0:
+            paths = [f for f in out.rstrip('\0').split('\0') if f]
+    else:
+        # Get the list of changed files in a single commit.
+        _, oid = key
+        # NOTE: The output from "git diff-files --numstat -z" is not equivalent
+        # to the output of "git show --numstat -z". "git diff-files" does not
+        # emit a NULL separator between each entry. That's why we use the
+        # default output (without "-z") and split on newline instead.
+        # This is also true for "git diff-index" as well.
+        if oid == dag.STAGE:
+            status, out, _ = git.diff_index(
+                'HEAD', cached=True, numstat=True, _readonly=True
+            )
+            if status == 0:
+                paths = [f for f in out.split('\n') if f]
+        elif oid == dag.WORKTREE:
+            status, out, _ = git.diff_files(numstat=True, _readonly=True)
+            if status == 0:
+                paths = [f for f in out.split('\n') if f]
+        else:
+            status, out, _ = git.show(
+                oid,
+                format='',
+                numstat=True,
+                no_renames=True,
+                z=True,
+                _readonly=True,
+            )
+            if status == 0:
+                paths = [f for f in out.rstrip('\0').split('\0') if f]
+
+    return paths
+
+
 class FileWidget(TreeWidget):
     files_selected = Signal(object)
     difftool_selected = Signal(object)
@@ -20,9 +84,30 @@ class FileWidget(TreeWidget):
     select_line_range_for_file = Signal(object)
     remark_toggled = Signal(object, object)
 
+    # Delay before a selected commit's file list is loaded. Holding an arrow
+    # key in the DAG steps through commits faster than this, so intermediate
+    # commits never spawn a git process; only the commit we land on does.
+    FILES_DEBOUNCE_MSEC = 100
+
+    # Number of file lists kept in the most-recently-used cache. Revisiting a
+    # commit (common while arrow-stepping the DAG) then renders instantly.
+    _FILES_CACHE_MAX = 50
+
     def __init__(self, context, parent, remarks=False):
         TreeWidget.__init__(self, parent)
         self.context = context
+        # Debounce + staleness token + MRU cache, mirroring CommitDiffWidget:
+        # the file list loads in the background once the selection settles,
+        # superseded results are dropped, and revisits skip git entirely.
+        # Volatile pseudo-commits (WORKTREE/STAGE) are never cached and the
+        # cache is dropped whenever the DAG reloads (see clear_files_cache).
+        self._pending_selection = None
+        self._files_token = 0
+        self._files_cache = collections.OrderedDict()
+        self._files_timer = QtCore.QTimer(self)
+        self._files_timer.setSingleShot(True)
+        self._files_timer.setInterval(self.FILES_DEBOUNCE_MSEC)
+        self._files_timer.timeout.connect(self._load_pending_files)
         self._columns_initialized = False
         # Guards _resize_columns() from mistaking its own section changes for a
         # manual drag, and records once the user has taken control of the widths.
@@ -75,66 +160,65 @@ class FileWidget(TreeWidget):
 
     def commits_selected(self, commits):
         if not commits:
+            self._files_timer.stop()
+            self._pending_selection = None
+            # Invalidate any in-flight load so a late result cannot repopulate
+            # the cleared list.
+            self._files_token += 1
             self.clear()
             return
 
-        git = self.context.git
-        paths = []
-
         if len(commits) > 1:
-            # Get a list of changed files for a commit range.
-            start_oid = commits[0].oid
-            end = commits[-1].oid
-            start = start_oid + '~'
-            if end == dag.STAGE:
-                status, out, _ = git.diff(
-                    start, cached=True, z=True, numstat=True, no_renames=True
-                )
-            elif end == dag.WORKTREE:
-                if start_oid == dag.STAGE:
-                    status, out, _ = git.diff(z=True, numstat=True, no_renames=True)
-                else:
-                    status, out, _ = git.diff(
-                        start, z=True, numstat=True, no_renames=True
-                    )
-            else:
-                status, out, _ = git.diff(
-                    start, end, z=True, numstat=True, no_renames=True
-                )
-            if status == 0:
-                paths = [f for f in out.rstrip('\0').split('\0') if f]
+            key = ('range', commits[0].oid, commits[-1].oid)
         else:
-            # Get the list of changed files in a single commit.
-            commit = commits[0]
-            oid = commit.oid
-            # NOTE: The output from "git diff-files --numstat -z" is not equivalent
-            # to the output of "git show --numstat -z". "git diff-files" does not
-            # emit a NULL separator between each entry. That's why we use the
-            # default output (without "-z") and split on newline instead.
-            # This is also true for "git diff-index" as well.
-            if oid == dag.STAGE:
-                status, out, _ = git.diff_index(
-                    'HEAD', cached=True, numstat=True, _readonly=True
-                )
-                if status == 0:
-                    paths = [f for f in out.split('\n') if f]
-            elif oid == dag.WORKTREE:
-                status, out, _ = git.diff_files(numstat=True, _readonly=True)
-                if status == 0:
-                    paths = [f for f in out.split('\n') if f]
-            else:
-                status, out, _ = git.show(
-                    oid,
-                    format='',
-                    numstat=True,
-                    no_renames=True,
-                    z=True,
-                    _readonly=True,
-                )
-                if status == 0:
-                    paths = [f for f in out.rstrip('\0').split('\0') if f]
+            key = ('oid', commits[0].oid)
+        self._pending_selection = key
+        # (Re)start the debounce; the files load once the selection settles.
+        self._files_timer.start()
 
+    def _files_key_cacheable(self, key):
+        """Return True when a selection key is safe to cache
+
+        The WORKTREE and STAGE pseudo-commits are volatile, so any file list
+        that involves them is never cached.
+        """
+        return not any(part in (dag.WORKTREE, dag.STAGE) for part in key)
+
+    def _load_pending_files(self):
+        """Load the file list for the most recently selected commit(s)"""
+        key = self._pending_selection
+        if key is None:
+            return
+        self._pending_selection = None
+        # Stamp the load so that a result arriving after the selection has
+        # already moved on is discarded in _files_ready().
+        self._files_token += 1
+        if self._files_key_cacheable(key):
+            cached = self._files_cache.get(key)
+            if cached is not None:
+                self._files_cache.move_to_end(key)
+                self.list_files(cached)
+                return
+        task = qtutils.SimpleTask(gather_files, self.context, key)
+        self.context.runtask.start(
+            task, result=partial(self._files_ready, self._files_token, key)
+        )
+
+    def _files_ready(self, token, key, paths):
+        """Apply a background result unless the selection has moved on"""
+        if token != self._files_token:
+            return
+        if self._files_key_cacheable(key):
+            self._files_cache[key] = paths
+            self._files_cache.move_to_end(key)
+            while len(self._files_cache) > self._FILES_CACHE_MAX:
+                self._files_cache.popitem(last=False)
         self.list_files(paths)
+
+    def clear_files_cache(self):
+        """Drop cached file lists, e.g. when the DAG reloads its commits"""
+        self._files_cache.clear()
+        self._files_token += 1
 
     def list_files(self, files_log):
         self.clear()
