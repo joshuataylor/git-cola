@@ -1792,6 +1792,12 @@ class GitDAG(standard.MainWindow):
         self._signature_busy = False
         self._stopping = False
         """Set when the window closes so background work can bow out"""
+        self._graph_stale = False
+        """The graphview needs (re)building from the current commit_list"""
+        self._graph_build_id = 0
+        """Bumped on every reload so a superseded deferred build bails out"""
+        self._commits_loaded = False
+        """Set once the reader finishes, so a lazy build sees the full history"""
 
         self.thread = None
         self.revtext = GitDagLineEdit(context)
@@ -2010,6 +2016,11 @@ class GitDAG(standard.MainWindow):
         # The model is updated in another thread so use
         # signals/slots to bring control back to the main GUI thread
         self.model.updated.connect(self.model_updated, type=Qt.QueuedConnection)
+        # Build the graph canvas the first time it is revealed, so a session
+        # that keeps the Graph dock closed never pays for it.
+        self.graphview_dock.visibilityChanged.connect(
+            self._graphview_visibility_changed, type=Qt.QueuedConnection
+        )
 
         qtutils.add_action(self, 'FocusInput', self.focus_input, hotkeys.FOCUS_INPUT)
         qtutils.add_action(self, 'FocusTree', self.focus_tree, hotkeys.FOCUS_TREE)
@@ -2249,6 +2260,11 @@ class GitDAG(standard.MainWindow):
         # Drop cached diff text; an external diff command or encoding change
         # could otherwise leave a stale diff on display after a reload.
         self.diffwidget.clear_diff_cache()
+        # The graph must be rebuilt from the incoming commits. Bumping the build
+        # id invalidates any deferred build still queued from a prior pass.
+        self._graph_stale = True
+        self._graph_build_id += 1
+        self._commits_loaded = False
 
     def add_commits(self, commits):
         """Add new commits from the reader thread"""
@@ -2271,9 +2287,43 @@ class GitDAG(standard.MainWindow):
 
     def thread_end(self):
         """The reader thread has completed"""
-        self.graphview.add_commits(self.commit_list)
+        # The full history is now in commit_list, so a lazy build is safe.
+        self._commits_loaded = True
+        # Restoring the selection and starting signature verification drive the
+        # tree and diff, which are independent of the graph canvas.
         self.restore_selection()
         self.start_signature_verification()
+        # Build the graph canvas only when its dock is visible, and defer it to
+        # the next event-loop turn so the tree and diff paint first. A dock that
+        # stays hidden is populated later by _graphview_visibility_changed.
+        if self.graphview_dock.isVisible():
+            QtCore.QTimer.singleShot(
+                0, partial(self._populate_graphview, self._graph_build_id)
+            )
+
+    def _populate_graphview(self, build_id):
+        """Build the graph canvas from the current commit_list
+
+        No-ops when a newer reload has superseded this build or the graph is
+        already up to date.
+        """
+        if build_id != self._graph_build_id or not self._graph_stale:
+            return
+        self.graphview.add_commits(self.commit_list)
+        # The tree/diff selection was restored before the canvas existed, so
+        # mirror it onto the freshly built graph and centre the view on it.
+        self.graphview.select_commits(self.selection or self.old_selection)
+        self.graphview.set_initial_view()
+        self._graph_stale = False
+
+    def _graphview_visibility_changed(self, visible):
+        """Populate the graph canvas the first time its dock is revealed
+
+        Only builds once the reader has finished; a mid-load reveal would
+        otherwise lay out a partial history that thread_end would not correct.
+        """
+        if visible and self._graph_stale and self._commits_loaded:
+            self._populate_graphview(self._graph_build_id)
 
     def start_signature_verification(self):
         """Apply known signatures and queue the rest for background verification
