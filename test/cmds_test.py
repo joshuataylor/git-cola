@@ -302,3 +302,20 @@ def test_open_repo_preserves_edited_commit_message(app_context):
 
     cmds.OpenRepo(app_context, main_repo).do()
     assert model.commitmsg == 'typed by hand\n'
+
+
+def test_move_to_trash_resolves_send2trash_lazily():
+    """send2trash is only imported when the command is constructed
+
+    The module-level probe uses find_spec so that importing cola.cmds does
+    not load send2trash (and, on macOS, the PyObjC bridge behind it).
+    """
+    import importlib.util
+
+    available = importlib.util.find_spec('send2trash') is not None
+    assert cmds.MoveToTrash.AVAILABLE == available
+    if available:
+        from send2trash import send2trash
+
+        command = cmds.MoveToTrash(Mock(), [])
+        assert command.remover is send2trash
