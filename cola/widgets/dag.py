@@ -1829,6 +1829,8 @@ class GitDAG(standard.MainWindow):
         self.filewidget = filelist.FileWidget(context, self)
         self.graphview = GraphView(context, self)
 
+        self._init_display_timer()
+
         # Scrolling brings new rows into view, which are the ones worth
         # verifying next. Debounce so that a flick does not queue a pass per
         # scroll event.
@@ -2186,9 +2188,23 @@ class GitDAG(standard.MainWindow):
         """Forward the intra-line diff timing option to the editor."""
         self.diffwidget.set_intraline_diff_timing(enabled, update=update)
 
+    def _init_display_timer(self):
+        """Create the timer that coalesces model updates into one display()
+
+        fsmonitor and refresh events arrive in bursts, and every display()
+        call runs a "git rev-parse" on the GUI thread before its no-op guard
+        can decide anything, so bursts are debounced into a single pass.
+        """
+        self._display_timer = QtCore.QTimer(self)
+        self._display_timer.setSingleShot(True)
+        self._display_timer.setInterval(200)
+        self._display_timer.timeout.connect(self.display)
+
     def model_updated(self):
         """Refresh the view when the model is updated"""
-        self.display()
+        # The window title only reads the model, so update it immediately;
+        # the expensive display() pass is debounced.
+        self._display_timer.start()
         self.update_window_title()
 
     def refresh(self):
@@ -2209,6 +2225,8 @@ class GitDAG(standard.MainWindow):
 
     def display(self):
         """Update the view when the Git refs change"""
+        # A direct call supersedes any debounced pass still pending.
+        self._display_timer.stop()
         ref = get(self.revtext)
         count = get(self.maxresults)
         context = self.context

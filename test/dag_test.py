@@ -748,6 +748,33 @@ def test_graph_node_tooltip_refreshes_only_after_materialisation(qapp, app_conte
         assert item.toolTip() == base + '\nSignature: Good'
 
 
+def test_model_updated_debounces_display(qapp, app_context):
+    """A burst of model updates coalesces into a single display() pass"""
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    # Set the mocks before _init_display_timer() so the timeout connects to
+    # the mock rather than the real display().
+    win.display = MagicMock()
+    win.update_window_title = MagicMock()
+    win._init_display_timer()
+    try:
+        win.model_updated()
+        win.model_updated()
+        win.model_updated()
+
+        # No synchronous display() pass; the burst is pending on the timer.
+        assert win.display.call_count == 0
+        assert win._display_timer.isActive()
+        # The cheap title update still happens immediately.
+        assert win.update_window_title.call_count == 3
+
+        win._display_timer.timeout.emit()
+        assert win.display.call_count == 1
+    finally:
+        win._display_timer.stop()
+        win.deleteLater()
+
+
 def _make_lazy_graph_dag(app_context, visible):
     """Build a GitDAG with a mock graphview/dock for lazy-build tests"""
     win = GitDAG.__new__(GitDAG)
