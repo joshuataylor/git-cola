@@ -1,4 +1,5 @@
 from __future__ import annotations
+import collections
 import os
 import re
 import time
@@ -28,6 +29,7 @@ from .. import utils
 from ..editpatch import edit_patch
 from ..i18n import N_
 from ..interaction import Interaction
+from ..models import dag
 from ..models import main
 from ..models import prefs
 from ..qtutils import get
@@ -2275,6 +2277,10 @@ class CommitDiffWidget(QtWidgets.QWidget):
     # commits never trigger a "git diff"; only the commit we land on does.
     DIFF_DEBOUNCE_MSEC = 100
 
+    # Number of raw diffs kept in the most-recently-used cache. Revisiting a
+    # commit (common while arrow-stepping the DAG) then renders instantly.
+    _DIFF_CACHE_MAX = 50
+
     def __init__(self, context, parent, is_commit=False, options=None):
         QtWidgets.QWidget.__init__(self, parent)
 
@@ -2309,6 +2315,11 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # after the selection has moved on is dropped instead of stomping the
         # view.
         self._diff_token = 0
+        # Most-recently-used cache of raw diff text keyed by diff_key. Serves
+        # commit revisits without re-running git or the highlighter. Volatile
+        # pseudo-commits (WORKTREE/STAGE) are never cached, and the whole cache
+        # is dropped whenever the DAG reloads (see clear_diff_cache).
+        self._diff_cache = collections.OrderedDict()
 
         author_font = QtGui.QFont(self.font())
         author_font.setPointSize(int(author_font.pointSize() * 1.1))
@@ -2371,14 +2382,13 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self.options = options
         self.diff.set_options(options)
 
-    def start_diff_task(self, task, diff_key=None):
-        """Clear the display and start a diff-gathering task
+    def _begin_diff(self, diff_key):
+        """Shared setup for the background and cache-hit diff paths
 
-        diff_key identifies the diff being loaded. Re-rendering the diff already
-        shown (e.g. after a word-wrap toggle) keeps the scroll position. When
-        switching to a different diff the outgoing position is remembered and
-        the incoming diff is restored to its remembered position, or shown from
-        the top if it has not been viewed yet.
+        Applies the diff-size cap, saves the outgoing scroll position and
+        restores the incoming one, records the diff on display, and returns a
+        fresh staleness token so that a superseded result is dropped in
+        set_diff().
         """
         # Cap the diff size so that selecting a commit with a very large diff
         # (e.g. one that adds a big file) stays responsive. The DAG setting is
@@ -2398,11 +2408,32 @@ class CommitDiffWidget(QtWidgets.QWidget):
                     self._scroll_positions[self._displayed_diff_key] = value
             self.diff.set_scrollbar_target(self._scroll_positions.get(diff_key))
         self._displayed_diff_key = diff_key
-        cmds.do(cmds.DiffLoading, self.context)
-        # Stamp the task so that a result arriving after the selection has
+        # Stamp the load so that a result arriving after the selection has
         # already moved on can be discarded in set_diff().
         self._diff_token += 1
-        token = self._diff_token
+        return self._diff_token
+
+    def _diff_key_cacheable(self, diff_key):
+        """Return True when a diff_key is safe to cache
+
+        The WORKTREE and STAGE pseudo-commits are volatile, so any diff that
+        involves them is never cached.
+        """
+        if diff_key is None:
+            return False
+        return not any(part in (dag.WORKTREE, dag.STAGE) for part in diff_key)
+
+    def start_diff_task(self, task, diff_key=None):
+        """Clear the display and start a diff-gathering task
+
+        diff_key identifies the diff being loaded. Re-rendering the diff already
+        shown (e.g. after a word-wrap toggle) keeps the scroll position. When
+        switching to a different diff the outgoing position is remembered and
+        the incoming diff is restored to its remembered position, or shown from
+        the top if it has not been viewed yet.
+        """
+        token = self._begin_diff(diff_key)
+        cmds.do(cmds.DiffLoading, self.context)
         self.context.runtask.start(task, result=lambda diff: self.set_diff(diff, token))
 
     def set_diff_oid(self, oid, filename=None):
@@ -2452,6 +2483,22 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self._pending_diff = None
         if pending[0] == 'range':
             _, start, end = pending
+            diff_key = (start, end, None)
+        else:
+            _, oid = pending
+            diff_key = (oid, None)
+        # Serve from cache when we can: revisiting a commit then skips git and
+        # the highlighter entirely. The cache-hit render still bumps the token
+        # so a slow task from a prior selection is discarded when it returns.
+        if self._diff_key_cacheable(diff_key):
+            cached = self._diff_cache.get(diff_key)
+            if cached is not None:
+                self._diff_cache.move_to_end(diff_key)
+                token = self._begin_diff(diff_key)
+                self.set_diff(cached, token)
+                return
+        if pending[0] == 'range':
+            _, start, end = pending
             self.set_diff_range(start, end)
         else:
             _, oid = pending
@@ -2474,6 +2521,20 @@ class CommitDiffWidget(QtWidgets.QWidget):
         if token is not None and token == self._scroll_to_header_token:
             self.diff.scroll_to_diff_header()
             self._scroll_to_header_token = None
+        # Remember the raw diff so a revisit renders instantly. A token of None
+        # is a direct render (e.g. a patch preview) whose diff_key may be stale,
+        # so those are not cached. The token guard above guarantees that a
+        # non-None token matches the diff currently on display.
+        if token is not None and self._diff_key_cacheable(self._displayed_diff_key):
+            key = self._displayed_diff_key
+            self._diff_cache[key] = diff
+            self._diff_cache.move_to_end(key)
+            while len(self._diff_cache) > self._DIFF_CACHE_MAX:
+                self._diff_cache.popitem(last=False)
+
+    def clear_diff_cache(self):
+        """Drop cached diff text, e.g. when the DAG reloads its commits"""
+        self._diff_cache.clear()
 
     def set_details(self, oid, author, email, date, summary):
         template_args = {'author': author, 'email': email}

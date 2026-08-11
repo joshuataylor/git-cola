@@ -2246,6 +2246,9 @@ class GitDAG(standard.MainWindow):
         self.commit_list = []
         self.graphview.clear()
         self.treewidget.clear()
+        # Drop cached diff text; an external diff command or encoding change
+        # could otherwise leave a stale diff on display after a reload.
+        self.diffwidget.clear_diff_cache()
 
     def add_commits(self, commits):
         """Add new commits from the reader thread"""
