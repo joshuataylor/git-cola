@@ -97,14 +97,30 @@ def relative_date(when, now=None):
     return ''
 
 
+_locale = None
+
+
+def _system_locale() -> QtCore.QLocale:
+    """Return a cached system locale
+
+    These formatters run once per commit in the DAG, and constructing a
+    QLocale per call is measurable on large histories. Built lazily so that
+    importing this module does not touch Qt.
+    """
+    global _locale
+    if _locale is None:
+        _locale = QtCore.QLocale()
+    return _locale
+
+
 def system_date(when) -> str:
     """Format a datetime using the system locale's short date and time format"""
-    return QtCore.QLocale().toString(to_qdatetime(when), QtCore.QLocale.ShortFormat)
+    return _system_locale().toString(to_qdatetime(when), QtCore.QLocale.ShortFormat)
 
 
 def short_time(when) -> str:
     """Format the time-of-day portion of a datetime using the system locale"""
-    locale = QtCore.QLocale()
+    locale = _system_locale()
     time_format = locale.timeFormat(QtCore.QLocale.ShortFormat)
     return locale.toString(to_qdatetime(when).time(), time_format)
 
