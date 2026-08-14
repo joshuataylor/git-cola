@@ -3926,7 +3926,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
             self.is_panning = False
             return
         self.handle_event(QtWidgets.QGraphicsView.mouseReleaseEvent, event)
-        self.viewport().repaint()
+        self.viewport().update()
 
     def wheelEvent(self, event):
         """Handle Qt mouse wheel events."""
