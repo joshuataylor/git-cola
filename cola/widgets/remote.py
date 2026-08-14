@@ -149,6 +149,9 @@ class RemoteList(QtWidgets.QListWidget):
             mode = QtWidgets.QAbstractItemView.ExtendedSelection
             self.setSelectionMode(mode)
         self.addItems(self.values)
+        # The remote list is fixed for the dialog's lifetime, so tooltip
+        # text can be cached instead of running git on every hover.
+        self._tooltip_cache = {}
 
     def event(self, event):
         """Display remote details in a tooltip"""
@@ -159,10 +162,16 @@ class RemoteList(QtWidgets.QListWidget):
                 idx = self.row(item)
                 if idx < len(self.values):
                     remote = self.values[idx]
-                    status, remote_details, _ = self.context.git.remote(
-                        'show', '-n', remote
-                    )
-                    if status == 0:
+                    try:
+                        remote_details = self._tooltip_cache[remote]
+                    except KeyError:
+                        status, remote_details, _ = self.context.git.remote(
+                            'show', '-n', remote, _readonly=True
+                        )
+                        if status != 0:
+                            remote_details = ''
+                        self._tooltip_cache[remote] = remote_details
+                    if remote_details:
                         QtWidgets.QToolTip.showText(
                             event.globalPos(), remote_details, self
                         )
