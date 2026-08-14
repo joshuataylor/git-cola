@@ -166,6 +166,43 @@ def test_repo_reader_contract(core, dag_context):
     assert 'log.showSignature=false' in call_args[0][0]
 
 
+def test_follow_args_single_pathspec():
+    """--follow is enabled for exactly one pathspec and nothing else"""
+    assert dag._follow_args(['main', '--', 'A']) == ['--follow']
+    assert dag._follow_args(['--', 'A']) == ['--follow']
+    assert dag._follow_args(['main', '--', 'A', 'B']) == []
+    assert dag._follow_args(['main']) == []
+    assert dag._follow_args(['main', '--']) == []
+
+
+@patch('cola.models.dag.core')
+def test_repo_reader_follows_single_file(core, app_context):
+    """A single-file DAG passes --follow so renames are tracked across history"""
+    commit_files()
+    app_context.model.update_status()
+    _mock_core_git_log(core, LOG_TEXT)
+
+    params = dag.DAG('main -- A', 1000)
+    reader = dag.RepoReader(app_context, params)
+    list(reader.get())
+
+    assert '--follow' in core.start_command.call_args[0][0]
+
+
+@patch('cola.models.dag.core')
+def test_repo_reader_no_follow_for_multiple_files(core, app_context):
+    """--follow is omitted when more than one path is in scope"""
+    commit_files()
+    app_context.model.update_status()
+    _mock_core_git_log(core, LOG_TEXT)
+
+    params = dag.DAG('main -- A B', 1000)
+    reader = dag.RepoReader(app_context, params)
+    list(reader.get())
+
+    assert '--follow' not in core.start_command.call_args[0][0]
+
+
 @patch('cola.models.dag.core')
 def test_repo_reader_never_verifies_signatures(core, dag_context):
     """Signature verification is kept out of the log that populates the DAG
