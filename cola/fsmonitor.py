@@ -239,6 +239,11 @@ if AVAILABLE == 'inotify':
             self._git_dir_wd_to_path_map = {}
             self._git_dir_path_to_wd_map = {}
             self._git_dir_wd = None
+            # (st_mtime_ns, st_size) of the index when the worktree watches
+            # were last refreshed. The tracked-file list can only change via
+            # an index write, so an unchanged index lets _refresh() skip the
+            # "git ls-files" subprocess and the watch-set rebuild.
+            self._index_fingerprint = None
 
         @staticmethod
         def _log_out_of_wds_message() -> None:
@@ -314,12 +319,28 @@ if AVAILABLE == 'inotify':
             with self._lock:
                 self._refresh()
 
+        def _index_changed(self) -> bool:
+            """Return True when the index changed since the last refresh
+
+            Refresh runs on the GUI thread, so skip the "git ls-files"
+            enumeration and watch rebuild when the index -- the only place a
+            tracked-file change can come from -- has not been written.
+            """
+            try:
+                st = core.stat(os.path.join(self._git_dir, 'index'))
+                fingerprint = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                fingerprint = None
+            changed = fingerprint is None or fingerprint != self._index_fingerprint
+            self._index_fingerprint = fingerprint
+            return changed
+
         def _refresh(self) -> None:
             if self._inotify_fd is None:
                 return
             context = self.context
             try:
-                if self._worktree is not None:
+                if self._worktree is not None and self._index_changed():
                     tracked_dirs = {
                         os.path.dirname(os.path.join(self._worktree, path))
                         for path in gitcmds.tracked_files(context)
