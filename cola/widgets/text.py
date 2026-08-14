@@ -167,7 +167,7 @@ class BaseTextEditExtension(QtCore.QObject):
     def set_tabwidth(self, width):
         self._tabwidth = width
         pixels = qtutils.text_width(self.widget.font(), 'M') * width
-        self.widget.setTabStopWidth(pixels)
+        self.widget.setTabStopDistance(pixels)
 
     def selected_line(self):
         contents = self.value()
