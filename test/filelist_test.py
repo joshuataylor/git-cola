@@ -7,7 +7,9 @@ import pytest
 from cola.models import dag
 from cola.widgets.filelist import FileWidget
 from cola.widgets.filelist import gather_files
+from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 
 @pytest.fixture(scope='module')
@@ -166,6 +168,61 @@ def test_empty_selection_cancels_the_pending_load(file_widget):
     # The token was bumped, so an in-flight result is now stale.
     widget._files_ready(token, ('oid', 'a' * 40), ['1\t2\ta.txt'])
     widget.list_files.assert_not_called()
+
+
+def _press_key(widget, key, modifier=Qt.NoModifier):
+    """Deliver a KeyPress event to the widget and return whether it was handled"""
+    event = QtGui.QKeyEvent(QtGui.QKeyEvent.KeyPress, key, modifier)
+    QtWidgets.QApplication.sendEvent(widget, event)
+    return event.isAccepted()
+
+
+@pytest.mark.parametrize('key', [Qt.Key_Return, Qt.Key_Enter])
+def test_shift_enter_scopes_dag_to_selection(file_widget, key):
+    """Shift+Enter on a selected file emits histories_selected."""
+    widget, _qapp = file_widget
+    scoped = MagicMock()
+    widget.histories_selected.connect(scoped)
+    widget.list_files(['1\t2\ta.txt'])
+    widget.topLevelItem(0).setSelected(True)
+
+    assert _press_key(widget, key, Qt.ShiftModifier) is True
+    scoped.assert_called_once_with(['a.txt'])
+
+
+def test_shift_enter_scopes_dag_to_multiple_files(file_widget):
+    """Show History supports multiple selected files."""
+    widget, _qapp = file_widget
+    scoped = MagicMock()
+    widget.histories_selected.connect(scoped)
+    widget.list_files(['1\t2\ta.txt', '3\t4\tb.txt'])
+    widget.topLevelItem(0).setSelected(True)
+    widget.topLevelItem(1).setSelected(True)
+
+    _press_key(widget, Qt.Key_Return, Qt.ShiftModifier)
+    scoped.assert_called_once_with(['a.txt', 'b.txt'])
+
+
+def test_plain_enter_is_not_intercepted(file_widget):
+    """Enter without Shift falls through to the base class."""
+    widget, _qapp = file_widget
+    widget.show_history = MagicMock()
+    widget.list_files(['1\t2\ta.txt'])
+    widget.topLevelItem(0).setSelected(True)
+
+    _press_key(widget, Qt.Key_Return)
+    widget.show_history.assert_not_called()
+
+
+def test_non_enter_key_does_not_scope_the_dag(file_widget):
+    """A plain key is not intercepted by the Shift+Enter handler."""
+    widget, _qapp = file_widget
+    widget.show_history = MagicMock()
+    widget.list_files(['1\t2\ta.txt'])
+    widget.topLevelItem(0).setSelected(True)
+
+    _press_key(widget, Qt.Key_A, Qt.ShiftModifier)
+    widget.show_history.assert_not_called()
 
 
 def test_gather_files_single_commit():
