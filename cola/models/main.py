@@ -196,7 +196,7 @@ class MainModel(QtCore.QObject):
             # "git rev-parse" exits with a non-zero exit status when the
             # safe.directory protection is active.
             if has_branches:
-                status, _, err = self.git.rev_parse('HEAD')
+                status, _, err = self.git.rev_parse('HEAD', _readonly=True)
                 is_valid = status == 0
             else:
                 err = None
@@ -544,7 +544,7 @@ class MainModel(QtCore.QObject):
 
     def is_commit_published(self) -> bool:
         """Return True if the latest commit exists in any remote branch"""
-        return bool(self.git.branch(r=True, contains='HEAD')[STDOUT])
+        return bool(self.git.branch(r=True, contains='HEAD', _readonly=True)[STDOUT])
 
     def untrack_paths(self, paths) -> tuple[int, str, str]:
         context = self.context
