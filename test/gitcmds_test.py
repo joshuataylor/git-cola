@@ -316,3 +316,34 @@ def test_parse_raw_diff_multiple_records():
 def test_parse_raw_diff_empty():
     """No output yields no records rather than raising"""
     assert list(gitcmds._parse_raw_diff('')) == []
+
+
+def test_add_filename_single_path():
+    args = ['HEAD']
+    gitcmds._add_filename(args, 'file.txt')
+    assert args == ['HEAD', '--', 'file.txt']
+
+
+def test_add_filename_path_sequence():
+    """Rename pairs pass both sides so git pairs them in the diff"""
+    args = ['HEAD']
+    gitcmds._add_filename(args, ('new.txt', 'old.txt'))
+    assert args == ['HEAD', '--', 'new.txt', 'old.txt']
+
+    args = []
+    gitcmds._add_filename(args, [])
+    assert args == []
+
+
+def test_oid_diff_renders_renames_with_both_paths(app_context):
+    """Diffing a rename with both paths shows "rename from/to" not an add"""
+    helper.write_file('first.txt', 'content\n')
+    helper.run_git('add', 'first.txt')
+    helper.run_git('commit', '-m', 'add first.txt')
+    helper.run_git('mv', 'first.txt', 'second.txt')
+    helper.run_git('commit', '-m', 'rename')
+    oid = helper.run_git('rev-parse', 'HEAD').strip()
+
+    out = gitcmds.oid_diff(app_context, oid, filename=('second.txt', 'first.txt'))
+    assert 'rename from first.txt' in out
+    assert 'rename to second.txt' in out
