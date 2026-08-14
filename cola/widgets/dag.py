@@ -1819,6 +1819,8 @@ class GitDAG(standard.MainWindow):
         """Bumped on every reload so a superseded deferred build bails out"""
         self._commits_loaded = False
         """Set once the reader finishes, so a lazy build sees the full history"""
+        self._scope_history = []
+        """Previous revision scopes, pushed on re-scope and popped by navigate_back"""
 
         self.thread = None
         self.revtext = GitDagLineEdit(context)
@@ -2072,6 +2074,9 @@ class GitDAG(standard.MainWindow):
         qtutils.add_action(self, 'FocusInput', self.focus_input, hotkeys.FOCUS_INPUT)
         qtutils.add_action(self, 'FocusTree', self.focus_tree, hotkeys.FOCUS_TREE)
         qtutils.add_action(self, 'FocusDiff', self.focus_diff, hotkeys.FOCUS_DIFF)
+        self.navigate_back_action = qtutils.add_action(
+            self, N_('Back'), self.navigate_back, hotkeys.NAVIGATE_BACK
+        )
         qtutils.add_close_action(self)
 
         self.set_params(params)
@@ -2079,6 +2084,8 @@ class GitDAG(standard.MainWindow):
     def set_params(self, params):
         context = self.context
         self.params = params
+        # A fresh set of params starts a new navigation context.
+        self._scope_history = []
         # Update fields affected by model
         self.revtext.setText(params.ref)
         self.maxresults.setValue(params.count)
@@ -2629,12 +2636,26 @@ class GitDAG(standard.MainWindow):
         argv = [self.model.currentbranch, '--']
         argv.extend(histories)
         rev_text = core.list2cmdline(argv)
-        self.revtext.setText(rev_text)
-        self.display()
+        self._scope_to(rev_text)
 
     def show_entire_history(self):
         """Clear any path or filter scope and show the full branch history"""
-        self.revtext.setText(self.model.currentbranch)
+        self._scope_to(self.model.currentbranch)
+
+    def _scope_to(self, rev_text):
+        """Re-scope the DAG, remembering the previous scope for navigate_back()"""
+        current = get(self.revtext)
+        if rev_text == current:
+            return
+        self._scope_history.append(current)
+        self.revtext.setText(rev_text)
+        self.display()
+
+    def navigate_back(self):
+        """Restore the revision scope from before the last re-scope"""
+        if not self._scope_history:
+            return
+        self.revtext.setText(self._scope_history.pop())
         self.display()
 
     def difftool_selected(self, files):
