@@ -831,6 +831,32 @@ def test_reveal_before_reader_finishes_does_not_build(qapp, app_context):
     assert win._graph_stale is True
 
 
+@patch('cola.widgets.dag.GitDAG')
+def test_git_dag_scopes_ref_to_paths(git_dag_cls, app_context):
+    """git_dag(paths=...) builds a '<branch> -- <paths>' path-limited ref"""
+    from cola.widgets import dag as dag_widget
+
+    app_context.model.currentbranch = 'main'
+    dag_widget.git_dag(app_context, paths=['A', 'B'], show=False)
+
+    params = git_dag_cls.call_args[0][1]
+    assert params.ref == 'main -- A B'
+    assert params.paths() == ['A', 'B']
+
+
+@patch('cola.widgets.dag.GitDAG')
+def test_git_dag_without_branch_omits_ref(git_dag_cls, app_context):
+    """A detached HEAD (no branch) still scopes to the paths via '-- <paths>'"""
+    from cola.widgets import dag as dag_widget
+
+    app_context.model.currentbranch = ''
+    dag_widget.git_dag(app_context, paths=['A'], show=False)
+
+    params = git_dag_cls.call_args[0][1]
+    assert params.ref == '-- A'
+    assert params.paths() == ['A']
+
+
 def test_superseded_deferred_build_bails(qapp, app_context):
     """A deferred build from a prior reload no-ops once a new reload starts."""
     win = _make_lazy_graph_dag(app_context, visible=True)
