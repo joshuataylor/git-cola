@@ -907,6 +907,8 @@ class GitHelper:
 
 
 class BranchesFilterWidget(QtWidgets.QWidget):
+    FILTER_DEBOUNCE_MSEC = 200
+
     def __init__(self, tree, parent=None):
         QtWidgets.QWidget.__init__(self, parent)
         self.tree = tree
@@ -920,8 +922,18 @@ class BranchesFilterWidget(QtWidgets.QWidget):
         self.main_layout = qtutils.hbox(defs.no_margin, defs.spacing, self.text)
         self.setLayout(self.main_layout)
 
-        self.text.textChanged.connect(self.apply_filter)
+        # Applying the filter rebuilds the whole branches tree, so debounce
+        # keystrokes instead of rebuilding once per character typed.
+        self._filter_timer = QtCore.QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(self.FILTER_DEBOUNCE_MSEC)
+        self._filter_timer.timeout.connect(self.apply_filter)
+
+        self.text.textChanged.connect(self._start_filter_timer)
         self.tree.updated.connect(self.apply_filter, type=Qt.QueuedConnection)
+
+    def _start_filter_timer(self):
+        self._filter_timer.start()
 
     def apply_filter(self):
         value = get(self.text)
