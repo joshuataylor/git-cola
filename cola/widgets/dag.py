@@ -3898,7 +3898,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.context_menu_event(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MidButton:
+        if event.button() == Qt.MiddleButton:
             pos = event.pos()
             self.mouse_start = [pos.x(), pos.y()]
             self.saved_matrix = self.transform()
@@ -3922,7 +3922,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
 
     def mouseReleaseEvent(self, event):
         self.pressed = False
-        if event.button() == Qt.MidButton:
+        if event.button() == Qt.MiddleButton:
             self.is_panning = False
             return
         self.handle_event(QtWidgets.QGraphicsView.mouseReleaseEvent, event)
