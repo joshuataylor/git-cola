@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from collections.abc import Callable
 from fnmatch import fnmatch
 from importlib import util as importlib_util
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from typing_extensions import Self
+
+from qtpy import QtCore
 
 from . import compat
 from . import core
@@ -2540,17 +2543,61 @@ class Rescan(ContextCommand):
 
 
 class Refresh(ContextCommand):
-    """Update refs, refresh the index, and update config"""
+    """Update refs, refresh the index, and update config
+
+    A refresh runs several git subprocesses on the GUI thread, so triggers
+    can arrive faster than a slow refresh completes -- fsmonitor events and
+    refresh-on-focus land queued behind a refresh that is already running.
+    Run immediately when idle and collapse triggers that arrive within the
+    debounce window into a single trailing refresh.
+    """
+
+    DEBOUNCE_SECS = 0.1
+    _last_refresh = 0.0
+    _pending_context = None
+    _timer = None
 
     @staticmethod
     def name() -> str:
         return N_('Refresh')
 
     def do(self) -> None:
-        self.model.update_status(update_index=True)
-        self.cfg.update()
-        self.fsmonitor.refresh()
-        self.selection.selection_changed.emit()
+        cls = Refresh
+        if time.time() - cls._last_refresh < cls.DEBOUNCE_SECS:
+            cls._schedule(self.context)
+        else:
+            cls._refresh(self.context)
+
+    @classmethod
+    def _refresh(cls, context) -> None:
+        context.model.update_status(update_index=True)
+        context.cfg.update()
+        context.fsmonitor.refresh()
+        context.selection.selection_changed.emit()
+        cls._last_refresh = time.time()
+
+    @classmethod
+    def _schedule(cls, context) -> None:
+        """Schedule one trailing refresh for a burst of triggers"""
+        cls._pending_context = context
+        if cls._timer is None:
+            cls._timer = timer = QtCore.QTimer()
+            timer.setSingleShot(True)
+            timer.setInterval(int(cls.DEBOUNCE_SECS * 1000))
+            timer.timeout.connect(cls._flush)
+        # A trigger landing while the timer is active rides along with the
+        # already-scheduled refresh instead of restarting the timer, so a
+        # steady stream of triggers cannot starve the refresh.
+        if not cls._timer.isActive():
+            cls._timer.start()
+
+    @classmethod
+    def _flush(cls) -> None:
+        """Run the trailing refresh for the most recent coalesced trigger"""
+        context = cls._pending_context
+        cls._pending_context = None
+        if context is not None:
+            cls._refresh(context)
 
 
 class RefreshConfig(ContextCommand):

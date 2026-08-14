@@ -4,6 +4,8 @@ import time
 from unittest.mock import Mock
 from unittest.mock import patch
 
+import pytest
+
 from cola import cmds
 
 from . import helper
@@ -319,3 +321,49 @@ def test_move_to_trash_resolves_send2trash_lazily():
 
         command = cmds.MoveToTrash(Mock(), [])
         assert command.remover is send2trash
+
+
+@pytest.fixture
+def refresh_state():
+    """Reset the Refresh command's coalescing state around a test"""
+
+    def reset():
+        cmds.Refresh._last_refresh = 0.0
+        cmds.Refresh._pending_context = None
+        cmds.Refresh._timer = None
+
+    reset()
+    yield
+    reset()
+
+
+def test_refresh_runs_immediately_when_idle(refresh_state):
+    context = Mock()
+    cmds.Refresh(context).do()
+
+    assert context.model.update_status.call_count == 1
+    context.fsmonitor.refresh.assert_called_once_with()
+    context.selection.selection_changed.emit.assert_called_once_with()
+
+
+def test_refresh_coalesces_a_burst_into_one_trailing_refresh(refresh_state):
+    context = Mock()
+    cmds.Refresh(context).do()  # The leading edge runs synchronously.
+    assert context.model.update_status.call_count == 1
+
+    # Stub the timer so the suite never constructs or starts a real QTimer.
+    cmds.Refresh._timer = timer = Mock()
+    timer.isActive.return_value = False
+    cmds.Refresh(context).do()  # Within the window: scheduled, not run.
+    timer.start.assert_called_once_with()
+
+    timer.isActive.return_value = True
+    cmds.Refresh(context).do()  # Rides along with the scheduled refresh.
+    timer.start.assert_called_once_with()
+    assert context.model.update_status.call_count == 1
+
+    cmds.Refresh._flush()  # Simulate the timer firing.
+    assert context.model.update_status.call_count == 2
+
+    cmds.Refresh._flush()  # Nothing pending: a no-op.
+    assert context.model.update_status.call_count == 2
