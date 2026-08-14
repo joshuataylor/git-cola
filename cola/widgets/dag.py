@@ -683,6 +683,16 @@ class GitDagLineEdit(completion.GitLogLineEdit):  # type: ignore[misc, valid-typ
             self, N_('Filter commits by line range'), self._filter_to_line_range
         )
 
+    def filter_actions(self):
+        """Return the "git log" filter actions in display order"""
+        return [
+            self._action_pickaxe_search,
+            self._action_filter_lines,
+            self._action_filter_to_current_author,
+            self._action_grep_search,
+            self._action_no_merges,
+        ]
+
     def contextMenuEvent(self, event):
         """Adds custom actions to the default context menu"""
         event_pos = event.pos()
@@ -690,11 +700,8 @@ class GitDagLineEdit(completion.GitLogLineEdit):  # type: ignore[misc, valid-typ
         menu.addSeparator()
         actions = menu.actions()
         first_action = actions[0]
-        menu.insertAction(first_action, self._action_pickaxe_search)
-        menu.insertAction(first_action, self._action_filter_lines)
-        menu.insertAction(first_action, self._action_filter_to_current_author)
-        menu.insertAction(first_action, self._action_grep_search)
-        menu.insertAction(first_action, self._action_no_merges)
+        for action in self.filter_actions():
+            menu.insertAction(first_action, action)
         menu.insertSeparator(first_action)
         menu.exec_(self.mapToGlobal(event_pos))
 
@@ -1817,6 +1824,17 @@ class GitDAG(standard.MainWindow):
         self.revtext = GitDagLineEdit(context)
         self.maxresults = standard.SpinBox(digits=None, maxi=9999999, wrap=True)
 
+        # Surface the revision field's filters (pickaxe, line range, author,
+        # message grep, ignore merges) as a toolbar button. They otherwise
+        # live only in the field's right-click menu, which is hard to find.
+        self.filter_button = qtutils.create_action_button(
+            tooltip=N_('Filter commits'), icon=icons.search()
+        )
+        self.filter_menu = qtutils.create_menu(N_('Filter commits'), self)
+        for action in self.revtext.filter_actions():
+            self.filter_menu.addAction(action)
+        self.filter_button.setMenu(self.filter_menu)
+
         self.zoom_out = qtutils.create_action_button(
             tooltip=N_('Zoom Out'), icon=icons.zoom_out()
         )
@@ -1906,9 +1924,14 @@ class GitDAG(standard.MainWindow):
         self.diffwidget.diff.menu_actions.append(self.diffwidget_copy_commit)
 
         self.controls_layout = qtutils.hbox(
-            defs.no_margin, defs.spacing, self.revtext, self.maxresults
+            defs.no_margin,
+            defs.spacing,
+            self.revtext,
+            self.filter_button,
+            self.maxresults,
         )
         self.controls_layout.setAlignment(self.maxresults, Qt.AlignTop)
+        self.controls_layout.setAlignment(self.filter_button, Qt.AlignTop)
 
         self.controls_widget = QtWidgets.QWidget()
         self.controls_widget.setLayout(self.controls_layout)
