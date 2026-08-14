@@ -158,6 +158,16 @@ class FileWidget(TreeWidget):
 
         self.itemSelectionChanged.connect(self.selection_changed)
 
+    def keyPressEvent(self, event):
+        """Scope the DAG to the selected file(s) on Shift+Enter"""
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and (
+            event.modifiers() & Qt.ShiftModifier
+        ):
+            self.show_history()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def selection_changed(self):
         items = self.selected_items()
         self.files_selected.emit([i.path for i in items])
