@@ -674,12 +674,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    # TODO: the calls to update_status() can be done asynchronously
-    # by hooking into the message_updated notification.
     from .widgets import remote
 
-    context = app.application_init(args)
-    context.model.update_status()
+    context = app.application_init(args, update=True)
     view = remote.fetch(context)
     return app.application_start(context, view)
 
@@ -836,8 +833,7 @@ def cmd_stash(args: argparse.Namespace) -> int:
 def cmd_tag(args: argparse.Namespace) -> int:
     from .widgets.createtag import new_create_tag
 
-    context = app.application_init(args)
-    context.model.update_status()
+    context = app.application_init(args, update=True)
     view = new_create_tag(context, name=args.name, ref=args.ref, sign=args.sign)
     return app.application_start(context, view)
 

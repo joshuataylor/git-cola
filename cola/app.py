@@ -578,7 +578,11 @@ def application_init(
     if setup_worktree:
         new_worktree(context, args.repo, args.prompt)
         if update:
-            context.model.update_status()
+            # Dialog launchers only need remotes, refs and the current branch
+            # before first paint. The full status scan (worktree diffs, the
+            # index refresh) runs in the background after the view is shown
+            # via default_start() -> async_update().
+            context.model.update_remotes()
 
     timer.stop('init')
     if args.perf:
