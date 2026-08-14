@@ -894,6 +894,69 @@ def test_git_dag_without_branch_omits_ref(git_dag_cls, app_context):
     assert params.paths() == ['A']
 
 
+def _make_scoped_dag(app_context):
+    """A minimal GitDAG wired for the re-scope/navigate_back logic."""
+    win = _make_dag_with_lists(app_context)
+    win.model = MagicMock()
+    win.model.currentbranch = 'main'
+    win._scope_history = []
+    win.display = MagicMock()
+    win.revtext.setText('main')
+    return win
+
+
+def test_navigate_back_steps_through_previous_scopes(qapp, app_context):
+    """navigate_back() pops the scope stack one entry at a time."""
+    win = _make_scoped_dag(app_context)
+
+    win.histories_selected(['a.txt'])
+    assert win.revtext.text() == 'main -- a.txt'
+    assert win._scope_history == ['main']
+
+    win.histories_selected(['b.txt'])
+    assert win.revtext.text() == 'main -- b.txt'
+    assert win._scope_history == ['main', 'main -- a.txt']
+
+    win.navigate_back()
+    assert win.revtext.text() == 'main -- a.txt'
+    win.navigate_back()
+    assert win.revtext.text() == 'main'
+    assert win._scope_history == []
+
+
+def test_navigate_back_with_empty_stack_is_a_no_op(qapp, app_context):
+    """Back with nothing to restore leaves the scope unchanged."""
+    win = _make_scoped_dag(app_context)
+
+    win.navigate_back()
+
+    assert win.revtext.text() == 'main'
+    win.display.assert_not_called()
+
+
+def test_rescope_to_same_ref_is_not_pushed(qapp, app_context):
+    """Re-scoping to the current ref does not stack a duplicate entry."""
+    win = _make_scoped_dag(app_context)
+
+    win.histories_selected(['a.txt'])
+    win.histories_selected(['a.txt'])
+
+    assert win._scope_history == ['main']
+
+
+def test_show_entire_history_is_reversible(qapp, app_context):
+    """Show-entire-history pushes the prior scope so back restores it."""
+    win = _make_scoped_dag(app_context)
+    win.histories_selected(['a.txt'])
+
+    win.show_entire_history()
+    assert win.revtext.text() == 'main'
+    assert win._scope_history == ['main', 'main -- a.txt']
+
+    win.navigate_back()
+    assert win.revtext.text() == 'main -- a.txt'
+
+
 def test_superseded_deferred_build_bails(qapp, app_context):
     """A deferred build from a prior reload no-ops once a new reload starts."""
     win = _make_lazy_graph_dag(app_context, visible=True)
