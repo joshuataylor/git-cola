@@ -444,7 +444,9 @@ class GitRepoModel(QtGui.QStandardItemModel):
     def _path_status(self, path: str) -> tuple[str | None, str]:
         return path_status(path, *self._status_sets())
 
-    def apply_data(self, data: list[str]) -> None:
+    def apply_data(
+        self, data: tuple[str, tuple[str | None, str], str, str, str]
+    ) -> None:
         entry = self.get(data[0])
         if entry:
             entry[1].set_status(data[1])
