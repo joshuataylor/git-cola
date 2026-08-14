@@ -426,6 +426,21 @@ class Commit:
         return len(self.parents) > 1
 
 
+def _follow_args(ref_args: list[str]) -> list[str]:
+    """Return ['--follow'] when the log is limited to a single pathspec.
+
+    "git log --follow" tracks a file across renames, but git only accepts it
+    for a single file, so it is enabled only when exactly one pathspec follows
+    the "--" separator.
+    """
+    if '--' not in ref_args:
+        return []
+    pathspec = ref_args[ref_args.index('--') + 1 :]
+    if len(pathspec) == 1:
+        return ['--follow']
+    return []
+
+
 class RepoReader:
     def __init__(
         self,
@@ -485,6 +500,7 @@ class RepoReader:
             + ['-%d' % self.params.count]
             + [f'--date={prefs.logdate(self.context)}']
             + ['--no-patch']
+            + _follow_args(ref_args)
             + ref_args
         )
         commit = None
