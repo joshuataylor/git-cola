@@ -130,3 +130,66 @@ def test_staging_all_untracked_leaves_nothing_selected(widget):
 
     assert _untracked_child_paths(widget) == []
     assert _selected_untracked(widget) == []
+
+
+def _children(widget, idx):
+    parent = widget.topLevelItem(idx)
+    return [parent.child(i) for i in range(parent.childCount())]
+
+
+def test_unchanged_sections_keep_their_items(widget):
+    """A refresh only rebuilds sections whose (path, deleted) contents changed."""
+    widget._model.set_contents(modified=['m1'], untracked=['u1', 'u2'])
+    widget.refresh()
+    untracked_before = _children(widget, status.UNTRACKED_IDX)
+    modified_before = _children(widget, status.MODIFIED_IDX)
+
+    # Identical contents: every section keeps its item objects.
+    widget.refresh()
+    assert all(
+        a is b
+        for a, b in zip(_children(widget, status.UNTRACKED_IDX), untracked_before)
+    )
+    assert all(
+        a is b for a, b in zip(_children(widget, status.MODIFIED_IDX), modified_before)
+    )
+
+    # Growing Modified rebuilds it but leaves Untracked untouched.
+    widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1', 'u2'])
+    widget.refresh()
+    untracked_after = _children(widget, status.UNTRACKED_IDX)
+    assert len(untracked_after) == 2
+    assert all(a is b for a, b in zip(untracked_after, untracked_before))
+    assert [item.path for item in _children(widget, status.MODIFIED_IDX)] == [
+        'm1',
+        'm2',
+    ]
+
+
+def test_deleted_flag_change_rebuilds_the_section(widget):
+    """The same path list with a changed deleted flag still rebuilds."""
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    item = _children(widget, status.MODIFIED_IDX)[0]
+    assert not item.deleted
+
+    widget._model.unstaged_deleted = {'m1'}
+    widget.refresh()
+    new_item = _children(widget, status.MODIFIED_IDX)[0]
+    assert new_item is not item
+    assert new_item.deleted
+
+
+def test_unchanged_refresh_preserves_the_selection(widget):
+    """A no-op refresh leaves the live selection and current item alone."""
+    widget._model.set_contents(untracked=['a', 'b', 'c'])
+    widget.refresh()
+    _select_untracked(widget, {'b'}, current='b')
+
+    widget.previous_contents = selection.State([], [], [], ['a', 'b', 'c'])
+    widget._save_selection()
+    widget.refresh()
+
+    assert _selected_untracked(widget) == ['b']
+    parent = widget.topLevelItem(status.UNTRACKED_IDX)
+    assert widget.currentItem() is parent.child(1)
