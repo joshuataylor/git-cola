@@ -243,7 +243,7 @@ if AVAILABLE == 'inotify':
             # were last refreshed. The tracked-file list can only change via
             # an index write, so an unchanged index lets _refresh() skip the
             # "git ls-files" subprocess and the watch-set rebuild.
-            self._index_fingerprint = None
+            self._index_fingerprint: tuple[int, int] | None = None
 
         @staticmethod
         def _log_out_of_wds_message() -> None:
