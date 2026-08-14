@@ -1831,6 +1831,11 @@ class GitDAG(standard.MainWindow):
             tooltip=N_('Filter commits'), icon=icons.search()
         )
         self.filter_menu = qtutils.create_menu(N_('Filter commits'), self)
+        self.show_all_history_action = qtutils.add_action(
+            self, N_('Show entire history'), self.show_entire_history
+        )
+        self.filter_menu.addAction(self.show_all_history_action)
+        self.filter_menu.addSeparator()
         for action in self.revtext.filter_actions():
             self.filter_menu.addAction(action)
         self.filter_button.setMenu(self.filter_menu)
@@ -2616,6 +2621,11 @@ class GitDAG(standard.MainWindow):
         argv.extend(histories)
         rev_text = core.list2cmdline(argv)
         self.revtext.setText(rev_text)
+        self.display()
+
+    def show_entire_history(self):
+        """Clear any path or filter scope and show the full branch history"""
+        self.revtext.setText(self.model.currentbranch)
         self.display()
 
     def difftool_selected(self, files):
