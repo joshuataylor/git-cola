@@ -530,7 +530,7 @@ class ImageViewerWindow(QtWidgets.QMainWindow):
         self.image_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.vbox.addWidget(self.image_view)
 
-        screen = QtWidgets.QDesktopWidget().screenGeometry(self)
+        screen = QtGui.QGuiApplication.primaryScreen().geometry()
         size = self.geometry()
         self.move(
             (screen.width() - size.width()) // 4, (screen.height() - size.height()) // 4
