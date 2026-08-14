@@ -143,6 +143,13 @@ class RepoTreeView(standard.TreeView):
             hotkeys.HISTORY,
         )
 
+        self.action_dag_history = qtutils.add_action_with_tooltip(
+            self,
+            N_('View History in DAG...'),
+            N_('View history for selected paths in git-dag'),
+            self.view_dag_history,
+        )
+
         self.action_stage = qtutils.add_action_with_tooltip(
             self,
             cmds.StageOrUnstage.name(),
@@ -372,6 +379,7 @@ class RepoTreeView(standard.TreeView):
 
         self.action_editor.setEnabled(selected)
         self.action_history.setEnabled(selected)
+        self.action_dag_history.setEnabled(selected)
         self.action_default_app.setEnabled(selected)
         self.action_parent_dir.setEnabled(selected)
 
@@ -394,6 +402,7 @@ class RepoTreeView(standard.TreeView):
         menu.addAction(self.action_stage)
         menu.addSeparator()
         menu.addAction(self.action_history)
+        menu.addAction(self.action_dag_history)
         menu.addAction(self.action_difftool)
         menu.addAction(self.action_difftool_predecessor)
         menu.addAction(self.action_blame)
@@ -522,6 +531,17 @@ class RepoTreeView(standard.TreeView):
         """Launch the configured history browser path-limited to entries."""
         paths = self.selected_paths()
         cmds.do(cmds.VisualizePaths, self.context, paths)
+
+    def view_dag_history(self):
+        """Open the built-in git-dag scoped to the selected paths."""
+        from . import dag as dag_widget  # lazy import; avoids a circular import
+
+        context = self.context
+        paths = self.selected_paths()
+        existing = getattr(context.view, 'dag', None)
+        view = dag_widget.git_dag(context, existing_view=existing, paths=paths)
+        if hasattr(context.view, 'dag'):
+            context.view.dag = view
 
     def untrack_selected(self):
         """Untrack selected paths."""

@@ -294,6 +294,9 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.view_history_action = qtutils.add_action(
             self, N_('View History...'), partial(view_history, context), hotkeys.HISTORY
         )
+        self.view_dag_history_action = qtutils.add_action(
+            self, N_('View History in DAG...'), partial(view_dag_history, context)
+        )
 
         self.view_blame_action = qtutils.add_action(
             self, N_('Blame...'), partial(view_blame, context), hotkeys.BLAME
@@ -883,6 +886,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             menu.addAction(self.revert_unstaged_edits_action)
 
         menu.addAction(self.view_history_action)
+        menu.addAction(self.view_dag_history_action)
         menu.addAction(self.view_blame_action)
         return menu
 
@@ -904,6 +908,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         action.setShortcut(hotkeys.STAGE_SELECTION)
 
         menu.addAction(self.view_history_action)
+        menu.addAction(self.view_dag_history_action)
         return menu
 
     def _create_unmerged_context_menu(self, menu, _s):
@@ -924,6 +929,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         )
         menu.addAction(self.launch_editor_action)
         menu.addAction(self.view_history_action)
+        menu.addAction(self.view_dag_history_action)
         menu.addAction(self.view_blame_action)
         menu.addSeparator()
         menu.addAction(self.checkout_ours_action)
@@ -986,6 +992,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
         if not self.selection_model.is_empty():
             menu.addAction(self.view_history_action)
+            menu.addAction(self.view_dag_history_action)
             menu.addAction(self.view_blame_action)
         return menu
 
@@ -1015,6 +1022,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             action.setShortcut(hotkeys.STAGE_SELECTION)
 
         menu.addAction(self.view_history_action)
+        menu.addAction(self.view_dag_history_action)
         return menu
 
     def _delete_untracked_files(self):
@@ -1326,6 +1334,17 @@ def view_blame(context):
 def view_history(context):
     """Signal that we should view history for paths."""
     cmds.do(cmds.VisualizePaths, context, context.selection.union())
+
+
+def view_dag_history(context):
+    """Open the built-in git-dag scoped to the selected paths."""
+    from . import dag as dag_widget  # lazy import; dag widget pulls in many widgets
+
+    paths = context.selection.union()
+    existing = getattr(context.view, 'dag', None)
+    view = dag_widget.git_dag(context, existing_view=existing, paths=paths)
+    if hasattr(context.view, 'dag'):
+        context.view.dag = view
 
 
 def copy_path(context, absolute=True):
