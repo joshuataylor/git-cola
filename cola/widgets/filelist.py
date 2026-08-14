@@ -79,6 +79,7 @@ class FileWidget(TreeWidget):
     files_selected = Signal(object)
     difftool_selected = Signal(object)
     histories_selected = Signal(object)
+    file_history_selected = Signal(object)
     grab_file = Signal(object)
     grab_file_from_parent = Signal(object)
     select_line_range_for_file = Signal(object)
@@ -123,6 +124,9 @@ class FileWidget(TreeWidget):
 
         self.show_history_action = qtutils.add_action(
             self, N_('Show History'), self.show_history, hotkeys.HISTORY
+        )
+        self.file_history_action = qtutils.add_action(
+            self, N_('Show File History...'), self._show_file_history
         )
         self.launch_difftool_action = qtutils.add_action(
             self, N_('Launch Diff Tool'), self.show_diff
@@ -272,6 +276,7 @@ class FileWidget(TreeWidget):
         menu.addAction(self.grab_file_action)
         menu.addAction(self.grab_file_from_parent_action)
         menu.addAction(self.show_history_action)
+        menu.addAction(self.file_history_action)
         menu.addAction(self.launch_difftool_action)
         menu.addAction(self.launch_editor_action)
         if self.toggle_remark_actions:
@@ -289,6 +294,12 @@ class FileWidget(TreeWidget):
     def _grab_file_from_parent(self):
         for path in self.selected_paths():
             self.grab_file_from_parent.emit(path)
+
+    def _show_file_history(self):
+        """Emit a signal to open the File History window for the selection"""
+        paths = self.selected_paths()
+        if len(paths) == 1:
+            self.file_history_selected.emit(paths[0])
 
     def _select_line_range(self):
         """Emit a signal so that we can select the line range for the selected file"""

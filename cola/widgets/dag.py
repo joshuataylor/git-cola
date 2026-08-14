@@ -1904,6 +1904,9 @@ class GitDAG(standard.MainWindow):
         self.filewidget.histories_selected.connect(
             self.histories_selected, type=Qt.QueuedConnection
         )
+        self.filewidget.file_history_selected.connect(
+            self.file_history_selected, type=Qt.QueuedConnection
+        )
 
         self.proxy = FocusRedirectProxy(
             self.treewidget, self.graphview, self.filewidget
@@ -2614,6 +2617,12 @@ class GitDAG(standard.MainWindow):
         range_expression = f'-L{start},+{span}:{filename}'
         self.revtext.insert(range_expression)
         self.display()
+
+    def file_history_selected(self, path):
+        """Open the File History window for a file from the files widget"""
+        from . import filehistory  # lazy import; avoids a circular import
+
+        filehistory.file_history(self.context, path)
 
     def histories_selected(self, histories):
         """Respond to file-based history selection from the files widget"""

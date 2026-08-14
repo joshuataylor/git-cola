@@ -298,6 +298,10 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             self, N_('View History in DAG...'), partial(view_dag_history, context)
         )
 
+        self.view_file_history_action = qtutils.add_action(
+            self, N_('Show File History...'), partial(view_file_history, context)
+        )
+
         self.view_blame_action = qtutils.add_action(
             self, N_('Blame...'), partial(view_blame, context), hotkeys.BLAME
         )
@@ -887,6 +891,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
         menu.addAction(self.view_history_action)
         menu.addAction(self.view_dag_history_action)
+        menu.addAction(self.view_file_history_action)
         menu.addAction(self.view_blame_action)
         return menu
 
@@ -909,6 +914,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
         menu.addAction(self.view_history_action)
         menu.addAction(self.view_dag_history_action)
+        menu.addAction(self.view_file_history_action)
         return menu
 
     def _create_unmerged_context_menu(self, menu, _s):
@@ -930,6 +936,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         menu.addAction(self.launch_editor_action)
         menu.addAction(self.view_history_action)
         menu.addAction(self.view_dag_history_action)
+        menu.addAction(self.view_file_history_action)
         menu.addAction(self.view_blame_action)
         menu.addSeparator()
         menu.addAction(self.checkout_ours_action)
@@ -993,6 +1000,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         if not self.selection_model.is_empty():
             menu.addAction(self.view_history_action)
             menu.addAction(self.view_dag_history_action)
+            menu.addAction(self.view_file_history_action)
             menu.addAction(self.view_blame_action)
         return menu
 
@@ -1023,6 +1031,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
         menu.addAction(self.view_history_action)
         menu.addAction(self.view_dag_history_action)
+        menu.addAction(self.view_file_history_action)
         return menu
 
     def _delete_untracked_files(self):
@@ -1345,6 +1354,15 @@ def view_dag_history(context):
     view = dag_widget.git_dag(context, existing_view=existing, paths=paths)
     if hasattr(context.view, 'dag'):
         context.view.dag = view
+
+
+def view_file_history(context):
+    """Open the File History window for the selected file."""
+    from . import filehistory  # lazy import; avoids a circular import
+
+    paths = context.selection.union()
+    if len(paths) == 1:
+        filehistory.file_history(context, paths[0])
 
 
 def copy_path(context, absolute=True):

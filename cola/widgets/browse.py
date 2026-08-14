@@ -150,6 +150,13 @@ class RepoTreeView(standard.TreeView):
             self.view_dag_history,
         )
 
+        self.action_file_history = qtutils.add_action_with_tooltip(
+            self,
+            N_('Show File History...'),
+            N_('Show the commits that touched the selected file'),
+            self.view_file_history,
+        )
+
         self.action_stage = qtutils.add_action_with_tooltip(
             self,
             cmds.StageOrUnstage.name(),
@@ -380,6 +387,9 @@ class RepoTreeView(standard.TreeView):
         self.action_editor.setEnabled(selected)
         self.action_history.setEnabled(selected)
         self.action_dag_history.setEnabled(selected)
+        self.action_file_history.setEnabled(
+            len(selection) == 1 and bool(self.selected_tracked_paths(selection))
+        )
         self.action_default_app.setEnabled(selected)
         self.action_parent_dir.setEnabled(selected)
 
@@ -403,6 +413,7 @@ class RepoTreeView(standard.TreeView):
         menu.addSeparator()
         menu.addAction(self.action_history)
         menu.addAction(self.action_dag_history)
+        menu.addAction(self.action_file_history)
         menu.addAction(self.action_difftool)
         menu.addAction(self.action_difftool_predecessor)
         menu.addAction(self.action_blame)
@@ -542,6 +553,14 @@ class RepoTreeView(standard.TreeView):
         view = dag_widget.git_dag(context, existing_view=existing, paths=paths)
         if hasattr(context.view, 'dag'):
             context.view.dag = view
+
+    def view_file_history(self):
+        """Open the File History window for the selected file."""
+        from . import filehistory  # lazy import; avoids a circular import
+
+        paths = self.selected_paths()
+        if len(paths) == 1:
+            filehistory.file_history(self.context, paths[0])
 
     def untrack_selected(self):
         """Untrack selected paths."""
