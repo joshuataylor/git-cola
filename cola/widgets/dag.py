@@ -47,13 +47,18 @@ from . import finder
 from . import standard
 
 
-def git_dag(context, args=None, existing_view=None, show=True):
+def git_dag(context, args=None, existing_view=None, show=True, paths=None):
     """Return a pre-populated git DAG widget."""
     model = context.model
     branch = model.currentbranch
-    # disambiguate between branch names and filenames by using '--'
-    branch_doubledash = (branch + ' --') if branch else ''
-    params = dag.DAG(branch_doubledash, 1000)
+    if paths:
+        # Scope the DAG to these paths, mirroring GitDAG.histories_selected().
+        argv = ([branch] if branch else []) + ['--'] + list(paths)
+        params = dag.DAG(core.list2cmdline(argv), 1000)
+    else:
+        # disambiguate between branch names and filenames by using '--'
+        branch_doubledash = (branch + ' --') if branch else ''
+        params = dag.DAG(branch_doubledash, 1000)
     params.set_arguments(args)
 
     if existing_view is None:
