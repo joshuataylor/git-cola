@@ -431,9 +431,14 @@ def common_diff_opts(context: ApplicationContext):
     return opts
 
 
-def _add_filename(args, filename: str) -> None:
+def _add_filename(args, filename) -> None:
+    """Append the pathspec, accepting a single path or a sequence of paths"""
     if filename:
-        args.extend(['--', filename])
+        args.append('--')
+        if isinstance(filename, (list, tuple)):
+            args.extend(filename)
+        else:
+            args.append(filename)
 
 
 def oid_diff(context: ApplicationContext, oid: str, filename: str | None = None) -> Any:
@@ -458,7 +463,10 @@ def oid_diff_range(
     else:
         args = [start, end]
     if filename:
-        encoding = context.cfg.file_encoding(filename)
+        if isinstance(filename, (list, tuple)):
+            encoding = context.cfg.file_encoding(filename[0])
+        else:
+            encoding = context.cfg.file_encoding(filename)
     else:
         encoding = context.cfg.gui_encoding()
     opts = common_diff_opts(context)
