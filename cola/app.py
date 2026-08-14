@@ -976,6 +976,7 @@ class ApplicationContext:
         self.fsmonitor: fsmonitor.Monitor | None = None
         self.view: ViewType | None = None  # QWidget
         self.browser_windows = []  # list of browse.Browser
+        self.file_history_windows = []  # list of filehistory.FileHistoryWindow
 
     def set_view(self, view: ViewType) -> None:
         """Initialize view-specific members"""
