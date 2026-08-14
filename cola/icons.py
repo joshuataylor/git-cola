@@ -82,10 +82,14 @@ def icon(basename: str) -> QtGui.QIcon:
     return from_name(name_from_basename(basename))
 
 
+@decorators.memoize
 def from_theme(name: str, fallback: str | None = None) -> QtGui.QIcon:
     """Grab an icon from the current theme with a fallback
 
     Support older versions of Qt checking for fromTheme's availability.
+
+    Memoized because MainView alone resolves ~90 icons up front and theme
+    lookups re-resolve the platform theme on every call.
 
     """
     if hasattr(QtGui.QIcon, 'fromTheme'):
@@ -132,6 +136,7 @@ def mkicon(value: QtGui.QIcon | None, default: Callable | None = None) -> QtGui.
     return value
 
 
+@decorators.memoize
 def from_style(key: QtWidgets.QStyle.StandardPixmap) -> QtGui.QIcon:
     """Maintain a cache of standard icons and return cache entries."""
     style = QtWidgets.QApplication.instance().style()
