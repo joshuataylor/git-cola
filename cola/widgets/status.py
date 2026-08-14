@@ -179,6 +179,9 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.previous_contents = None
         self.was_visible = True
         self.expanded_items = set()
+        # Per-section [(path, deleted), ...] currently displayed, used to
+        # skip rebuilding sections whose contents have not changed.
+        self._displayed_subtrees = {}
 
         self.image_formats = qtutils.ImageFormats()
 
@@ -637,14 +640,20 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.old_current_item = self.current_item()
 
     def refresh(self):
-        self._set_staged(self._model.staged)
-        self._set_modified(self._model.modified)
-        self._set_unmerged(self._model.unmerged)
-        self._set_untracked(self._model.untracked)
-        self._update_column_widths()
+        # Sections whose (path, deleted) contents are unchanged keep their
+        # items. When nothing rebuilt, the Qt selection and scrollbars were
+        # never touched, so the restore passes (and their next-item
+        # heuristics) have nothing to do and are skipped.
+        changed = self._set_staged(self._model.staged)
+        changed = self._set_modified(self._model.modified) or changed
+        changed = self._set_unmerged(self._model.unmerged) or changed
+        changed = self._set_untracked(self._model.untracked) or changed
+        if changed:
+            self._update_column_widths()
         self._update_actions()
-        self._restore_selection()
-        self._restore_scrollbars()
+        if changed:
+            self._restore_selection()
+            self._restore_scrollbars()
 
     def _update_actions(self, selected=None):
         if selected is None:
@@ -660,9 +669,9 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.copy_basename_action.setEnabled(enabled)
 
     def _set_staged(self, items):
-        """Adds items to the 'Staged' sub-tree."""
+        """Adds items to the 'Staged' sub-tree. Returns True when rebuilt."""
         with qtutils.BlockSignals(self):
-            self._set_subtree(
+            return self._set_subtree(
                 items,
                 STAGED_IDX,
                 N_('Staged'),
@@ -671,9 +680,9 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             )
 
     def _set_modified(self, items):
-        """Adds items to the 'Modified' sub-tree."""
+        """Adds items to the 'Modified' sub-tree. Returns True when rebuilt."""
         with qtutils.BlockSignals(self):
-            self._set_subtree(
+            return self._set_subtree(
                 items,
                 MODIFIED_IDX,
                 N_('Modified'),
@@ -681,33 +690,52 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             )
 
     def _set_unmerged(self, items):
-        """Adds items to the 'Unmerged' sub-tree."""
+        """Adds items to the 'Unmerged' sub-tree. Returns True when rebuilt."""
         deleted_set = {path for path in items if not self.context.ops.exists(path)}
         with qtutils.BlockSignals(self):
-            self._set_subtree(
+            return self._set_subtree(
                 items, UNMERGED_IDX, N_('Unmerged'), deleted_set=deleted_set
             )
 
     def _set_untracked(self, items):
-        """Adds items to the 'Untracked' sub-tree."""
+        """Adds items to the 'Untracked' sub-tree. Returns True when rebuilt."""
         with qtutils.BlockSignals(self):
-            self._set_subtree(items, UNTRACKED_IDX, N_('Untracked'), untracked=True)
+            return self._set_subtree(
+                items, UNTRACKED_IDX, N_('Untracked'), untracked=True
+            )
 
     def _set_subtree(
         self, items, idx, parent_title, staged=False, untracked=False, deleted_set=None
     ):
-        """Add a list of items to a treewidget item."""
+        """Add a list of items to a treewidget item
+
+        Returns True when the section was rebuilt and False when the existing
+        items were kept because the (path, deleted) contents are unchanged --
+        the common case for refreshes that touch other sections or nothing.
+        """
         parent = self.topLevelItem(idx)
         hide = not bool(items)
         parent.setHidden(hide)
+
+        if prefs.status_show_totals(self.context):
+            parent.setText(0, f'{parent_title} ({len(items)})')
+
+        # The (path, deleted) pairs fully determine each row's text and icon
+        # ("staged"/"untracked" are constant per section), so an unchanged
+        # sequence means the displayed items are already correct.
+        displayed = [
+            (item, deleted_set is not None and item in deleted_set) for item in items
+        ]
+        if displayed == self._displayed_subtrees.get(idx):
+            return False
+        self._displayed_subtrees[idx] = displayed
 
         # sip v4.14.7 and below leak memory in parent.takeChildren()
         # so we use this backwards-compatible construct instead
         while parent.takeChild(0) is not None:
             pass
 
-        for item in items:
-            deleted = deleted_set is not None and item in deleted_set
+        for item, deleted in displayed:
             treeitem = qtutils.create_treeitem(
                 item,
                 staged=staged,
@@ -716,9 +744,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             )
             parent.addChild(treeitem)
         self._expand_items(idx, items)
-
-        if prefs.status_show_totals(self.context):
-            parent.setText(0, f'{parent_title} ({len(items)})')
+        return True
 
     def _update_column_widths(self):
         self.resizeColumnToContents(0)
