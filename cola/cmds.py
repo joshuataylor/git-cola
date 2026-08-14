@@ -1527,7 +1527,9 @@ class DiffImage(EditModel):
         annex = self.annex
 
         images = []
-        index = self.git.diff_index(head, '--', filename, cached=True)[STDOUT]
+        index = self.git.diff_index(head, '--', filename, cached=True, _readonly=True)[
+            STDOUT
+        ]
         if index:
             # Example:
             #  :100644 100644 fabadb8... 4866510... M      describe.c
@@ -1604,7 +1606,9 @@ class DiffImage(EditModel):
         #  ::100644 100644 100644 fabadb8... cc95eb0... 4866510... \
         #  MM      describe.c
         images = []
-        index = self.git.diff_index(head, '--', filename, cached=True, cc=True)[STDOUT]
+        index = self.git.diff_index(
+            head, '--', filename, cached=True, cc=True, _readonly=True
+        )[STDOUT]
         if index:
             parts = index.split(' ')
             if len(parts) > 3:
@@ -1644,7 +1648,7 @@ class DiffImage(EditModel):
         if annex_image:
             images.append((annex_image, False))  # git annex HEAD
         else:
-            worktree = self.git.diff_files('--', filename)[STDOUT]
+            worktree = self.git.diff_files('--', filename, _readonly=True)[STDOUT]
             parts = worktree.split(' ')
             if len(parts) > 3:
                 oid = parts[2]
@@ -2198,7 +2202,9 @@ class OpenParentRepo(OpenRepo):
     def __init__(self, context: ApplicationContext) -> None:
         path = ''
         if version.check_git(context, 'show-superproject-working-tree'):
-            status, out, _ = context.git.rev_parse(show_superproject_working_tree=True)
+            status, out, _ = context.git.rev_parse(
+                show_superproject_working_tree=True, _readonly=True
+            )
             if status == 0:
                 path = out
         if not path:

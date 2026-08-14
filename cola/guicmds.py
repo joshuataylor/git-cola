@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 def copy_commit_id_to_clipboard(context: ApplicationContext) -> None:
     """Copy the current commit ID to the clipboard"""
-    status, commit_id, _ = context.git.rev_parse('HEAD')
+    status, commit_id, _ = context.git.rev_parse('HEAD', _readonly=True)
     if status == 0 and commit_id:
         qtutils.set_clipboard(commit_id)
 
