@@ -153,6 +153,7 @@ class BranchesTreeWidget(standard.TreeWidget):
         self._branch_details_in_progress = False
         self._tree_states = None
         self._name_filter = ''
+        self._tooltip_cache = {}
 
         self.updated.connect(self.refresh, type=Qt.QueuedConnection)
         context.model.updated.connect(self.updated)
@@ -169,16 +170,12 @@ class BranchesTreeWidget(standard.TreeWidget):
             pos = event.pos()
             item = self.itemAt(pos)
             if item and item.item_type == ItemType.REMOTE:
-                remote = item.name
-                status, details, _ = self.context.git.remote('show', '-n', remote)
-                if status == 0:
+                details = self._tooltip_details(ItemType.REMOTE, item.name)
+                if details:
                     QtWidgets.QToolTip.showText(event.globalPos(), details, self)
             elif item and item.item_type == ItemType.REF_NAME:
-                ref_name = item.refname
-                status, details, _ = self.context.git.show(
-                    ref_name, decorate=True, no_patch=True
-                )
-                if status == 0:
+                details = self._tooltip_details(ItemType.REF_NAME, item.refname)
+                if details:
                     QtWidgets.QToolTip.showText(event.globalPos(), details, self)
             else:
                 QtWidgets.QToolTip.hideText()
@@ -186,6 +183,29 @@ class BranchesTreeWidget(standard.TreeWidget):
             return True
 
         return super().event(event)
+
+    def _tooltip_details(self, item_type, name):
+        """Return tooltip text for a remote or ref
+
+        Tooltip events run git synchronously on the GUI thread, so cache the
+        text per (type, name) until the next refresh instead of re-running
+        git on every hover.
+        """
+        key = (item_type, name)
+        try:
+            return self._tooltip_cache[key]
+        except KeyError:
+            pass
+        if item_type == ItemType.REMOTE:
+            status, details, _ = self.context.git.remote(
+                'show', '-n', name, _readonly=True
+            )
+        else:
+            status, details, _ = self.context.git.show(
+                name, decorate=True, no_patch=True, _readonly=True
+            )
+        details = self._tooltip_cache[key] = details if status == 0 else ''
+        return details
 
     def set_name_filter(self, value):
         """Update the name filter and rebuild the tree to include only matching refs"""
@@ -195,6 +215,7 @@ class BranchesTreeWidget(standard.TreeWidget):
     def refresh(self):
         """Refresh the UI widgets to match the current state"""
         self._needs_refresh = True
+        self._tooltip_cache.clear()
         self._refresh()
 
     def _refresh(self):
