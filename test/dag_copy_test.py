@@ -103,3 +103,53 @@ def test_right_click_inside_selection_copies_the_whole_selection():
     with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
         viewer.copy_to_clipboard()
     set_clipboard.assert_called_once_with('aaa\nbbb')
+
+
+MESSAGES = {
+    'aaa': 'subject one\n\nbody that\nwraps.\n\nSigned-off-by: X <x@y>\n',
+    'bbb': 'subject two\n',
+}
+
+
+def _fake_log(_context, _count, oid, *_args, **_kwargs):
+    return MESSAGES[oid]
+
+
+def test_copy_commit_message_keeps_wrapping():
+    viewer = _Viewer(_items(('aaa', 1)))
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
+        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+            viewer.copy_message_to_clipboard()
+    set_clipboard.assert_called_once_with(
+        'subject one\n\nbody that\nwraps.\n\nSigned-off-by: X <x@y>'
+    )
+
+
+def test_copy_commit_message_unwrapped_joins_body_only():
+    viewer = _Viewer(_items(('aaa', 1)))
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
+        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+            viewer.copy_message_unwrapped_to_clipboard()
+    set_clipboard.assert_called_once_with(
+        'subject one\n\nbody that wraps.\n\nSigned-off-by: X <x@y>'
+    )
+
+
+def test_copy_commit_message_joins_multiple_selection_in_generation_order():
+    viewer = _Viewer(_items(('bbb', 2), ('aaa', 1)))
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
+        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+            viewer.copy_message_unwrapped_to_clipboard()
+    set_clipboard.assert_called_once_with(
+        'subject one\n\nbody that wraps.\n\nSigned-off-by: X <x@y>\n\nsubject two'
+    )
+
+
+def test_copy_commit_message_skips_pseudo_commits_and_empty_selection():
+    viewer = _Viewer(_items((dag_model.WORKTREE, 2), (dag_model.STAGE, 1)))
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log) as log:
+        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+            viewer.copy_message_to_clipboard()
+            viewer.copy_message_unwrapped_to_clipboard()
+    log.assert_not_called()
+    set_clipboard.assert_not_called()

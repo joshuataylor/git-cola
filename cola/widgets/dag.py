@@ -24,6 +24,7 @@ from .. import hotkeys
 from .. import icons
 from .. import qtcompat
 from .. import qtutils
+from .. import textwrap
 from .. import utils
 from ..compat import maxsize
 from ..i18n import N_
@@ -224,6 +225,21 @@ class ViewerMixin:
             abbrev = prefs.abbrev(self.context)
             qtutils.set_clipboard('\n'.join(oid[:abbrev] for oid in oids))
 
+    def copy_message_to_clipboard(self):
+        """Copy the selected commit messages to the clipboard"""
+        self._copy_messages(unwrap=False)
+
+    def copy_message_unwrapped_to_clipboard(self):
+        """Copy the selected commit messages with paragraphs unwrapped"""
+        self._copy_messages(unwrap=True)
+
+    def _copy_messages(self, unwrap):
+        oids = self.selected_oids_for_copy()
+        if not oids:
+            return
+        messages = [commit_message(self.context, oid, unwrap=unwrap) for oid in oids]
+        qtutils.set_clipboard('\n\n'.join(msg for msg in messages if msg))
+
     def checkout_branch(self):
         """Checkout the clicked/selected branch"""
         branches = []
@@ -387,6 +403,12 @@ class ViewerMixin:
         self.menu_actions['copy_short'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
+        self.menu_actions['copy_message'].setEnabled(
+            has_single_selection_or_clicked and has_oid
+        )
+        self.menu_actions['copy_message_unwrapped'].setEnabled(
+            has_single_selection_or_clicked and has_oid
+        )
         self.menu_actions['create_branch'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
@@ -468,7 +490,22 @@ class ViewerMixin:
         menu.addAction(self.menu_actions['save_blob_from_parent'])
         menu.addAction(self.menu_actions['copy_short'])
         menu.addAction(self.menu_actions['copy'])
+        menu.addAction(self.menu_actions['copy_message'])
+        menu.addAction(self.menu_actions['copy_message_unwrapped'])
         menu.exec_(self.mapToGlobal(event.pos()))
+
+
+def commit_message(context, oid, unwrap=False):
+    """Return the full commit message for an oid
+
+    With unwrap=True the body paragraphs are joined back into single lines
+    while the subject line is left untouched.
+    """
+    message = gitcmds.log(context, '-1', oid, '--', pretty='format:%B').strip()
+    if not unwrap or not message:
+        return message
+    subject, sep, body = message.partition('\n')
+    return subject + sep + textwrap.unwrap(body)
 
 
 def _diff_expression(context, widget, oid, is_root_commit):
@@ -655,6 +692,22 @@ def viewer_actions(widget, proxy):
                 N_('Copy Commit (Short)'),
                 proxy.copy_to_clipboard_short,
                 hotkeys.COPY,
+            ),
+        ),
+        'copy_message': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit Message'),
+                proxy.copy_message_to_clipboard,
+            ),
+        ),
+        'copy_message_unwrapped': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit Message (Unwrapped)'),
+                proxy.copy_message_unwrapped_to_clipboard,
             ),
         ),
     }
@@ -1931,7 +1984,27 @@ class GitDAG(standard.MainWindow):
                 hotkeys.COPY_COMMIT_ID,
             ),
         )
-        self.diffwidget.diff.menu_actions.append(self.diffwidget_copy_commit)
+        self.diffwidget_copy_message = set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                self.diffwidget.diff,
+                N_('Copy Commit Message'),
+                self.treewidget.copy_message_to_clipboard,
+            ),
+        )
+        self.diffwidget_copy_message_unwrapped = set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                self.diffwidget.diff,
+                N_('Copy Commit Message (Unwrapped)'),
+                self.treewidget.copy_message_unwrapped_to_clipboard,
+            ),
+        )
+        self.diffwidget.diff.menu_actions.extend((
+            self.diffwidget_copy_commit,
+            self.diffwidget_copy_message,
+            self.diffwidget_copy_message_unwrapped,
+        ))
 
         self.controls_layout = qtutils.hbox(
             defs.no_margin,
@@ -1962,6 +2035,7 @@ class GitDAG(standard.MainWindow):
         self.diff_options = diff.Options(self.diffwidget)
         self.diffwidget.set_options(self.diff_options)
         self.diff_options.hide_advanced_options()
+        self.diff_options.show_commit_options()
         self.diff_options.set_diff_type(main.Types.TEXT)
 
         self.diff_dock = qtutils.create_dock('Diff', N_('Diff'), self, hide_title=True)
@@ -2174,6 +2248,9 @@ class GitDAG(standard.MainWindow):
         state['display_status'] = self.params.display_status
         state['log'] = self.treewidget.export_state()
         state['word_wrap'] = self.diffwidget.options.enable_word_wrapping.isChecked()
+        state[
+            'unwrap_commit_message'
+        ] = self.diffwidget.options.unwrap_commit_message.isChecked()
         state['intraline_diff_preset'] = self.diffwidget.options.intraline_diff_preset()
         state[
             'intraline_diff_timing'
@@ -2204,6 +2281,9 @@ class GitDAG(standard.MainWindow):
 
         self.lock_layout_action.setChecked(state.get('lock_layout', False))
         self.diffwidget.set_word_wrapping(state.get('word_wrap', False), update=True)
+        self.diffwidget.set_unwrap_commit_message(
+            state.get('unwrap_commit_message', False), update=True
+        )
 
         try:
             log_state = state['log']
