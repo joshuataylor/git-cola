@@ -226,3 +226,28 @@ def test_copy_link_without_a_web_remote_is_a_no_op():
     set_clipboard.assert_not_called()
 
 
+def test_format_message_tooltip_escapes_and_preserves_line_breaks():
+    assert '' == dag.format_message_tooltip('')
+    assert '<pre>a &lt;b&gt;\n\nbody</pre>' == dag.format_message_tooltip(
+        'a <b>\n\nbody'
+    )
+
+
+class _Tree:
+    """Drive CommitTreeWidget.message_tooltip without building the widget."""
+
+    message_tooltip = dag.CommitTreeWidget.message_tooltip
+
+    def __init__(self):
+        self.context = object()
+        self._message_tooltips = {}
+
+
+def test_message_tooltip_is_cached_per_oid_and_skips_pseudo_commits():
+    tree = _Tree()
+    with patch.object(dag, 'commit_message', return_value='subject\n\nbody') as log:
+        first = tree.message_tooltip(_FakeCommit('aaa', 1))
+        second = tree.message_tooltip(_FakeCommit('aaa', 1))
+        assert '' == tree.message_tooltip(_FakeCommit(dag_model.WORKTREE, 2))
+    assert first == second == '<pre>subject\n\nbody</pre>'
+    log.assert_called_once()
