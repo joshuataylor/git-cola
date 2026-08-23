@@ -176,3 +176,53 @@ def test_copy_commit_title_skips_pseudo_commits():
     with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
         viewer.copy_title_to_clipboard()
     set_clipboard.assert_not_called()
+
+
+def test_copy_oneline_joins_short_oid_and_title():
+    viewer = _Viewer(_items(('a' * 40, 1), ('b' * 40, 2)))
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        with patch.object(dag.prefs, 'abbrev', return_value=7):
+            viewer.copy_oneline_to_clipboard()
+    expect = 'aaaaaaa title ' + 'a' * 40 + '\nbbbbbbb title ' + 'b' * 40
+    set_clipboard.assert_called_once_with(expect)
+
+
+def _fake_web_url(_context, oid):
+    return f'https://example.com/org/repo/commit/{oid}'
+
+
+def test_copy_link_copies_one_url_per_commit():
+    viewer = _Viewer(_items(('aaa', 1), ('bbb', 2)))
+    with patch.object(dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url):
+        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+            viewer.copy_link_to_clipboard()
+    set_clipboard.assert_called_once_with(
+        'https://example.com/org/repo/commit/aaa\n'
+        'https://example.com/org/repo/commit/bbb'
+    )
+
+
+def test_copy_markdown_link_formats_abbrev_url_and_title():
+    viewer = _Viewer(_items(('a' * 40, 1)))
+    with patch.object(dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url):
+        with patch.object(dag.prefs, 'abbrev', return_value=7):
+            with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+                viewer.copy_markdown_link_to_clipboard()
+    set_clipboard.assert_called_once_with(
+        '[aaaaaaa](https://example.com/org/repo/commit/'
+        + 'a' * 40
+        + ') title '
+        + 'a' * 40
+    )
+
+
+def test_copy_link_without_a_web_remote_is_a_no_op():
+    viewer = _Viewer(_items(('aaa', 1)))
+    with patch.object(dag.gitcmds, 'commit_web_url', return_value=''):
+        with patch.object(dag.prefs, 'abbrev', return_value=7):
+            with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+                viewer.copy_link_to_clipboard()
+                viewer.copy_markdown_link_to_clipboard()
+    set_clipboard.assert_not_called()
+
+
