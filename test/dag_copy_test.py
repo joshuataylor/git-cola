@@ -11,9 +11,10 @@ from cola.widgets import dag
 
 
 class _FakeCommit:
-    def __init__(self, oid, generation):
+    def __init__(self, oid, generation, summary=''):
         self.oid = oid
         self.generation = generation
+        self.summary = summary or f'title {oid}'
 
 
 class _FakeItem:
@@ -152,4 +153,26 @@ def test_copy_commit_message_skips_pseudo_commits_and_empty_selection():
             viewer.copy_message_to_clipboard()
             viewer.copy_message_unwrapped_to_clipboard()
     log.assert_not_called()
+    set_clipboard.assert_not_called()
+
+
+def test_copy_commit_title_joins_titles_in_generation_order():
+    viewer = _Viewer(_items(('bbb', 2), ('aaa', 1)))
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        viewer.copy_title_to_clipboard()
+    set_clipboard.assert_called_once_with('title aaa\ntitle bbb')
+
+
+def test_copy_commit_title_uses_the_clicked_commit_outside_the_selection():
+    clicked = _FakeCommit('ccc', 3, summary='clicked title')
+    viewer = _Viewer(_items(('aaa', 1)), clicked=clicked)
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        viewer.copy_title_to_clipboard()
+    set_clipboard.assert_called_once_with('clicked title')
+
+
+def test_copy_commit_title_skips_pseudo_commits():
+    viewer = _Viewer(_items((dag_model.WORKTREE, 2), (dag_model.STAGE, 1)))
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        viewer.copy_title_to_clipboard()
     set_clipboard.assert_not_called()
