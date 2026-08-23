@@ -230,11 +230,40 @@ class ViewerMixin:
             abbrev = prefs.abbrev(self.context)
             qtutils.set_clipboard('\n'.join(oid[:abbrev] for oid in oids))
 
+    def _copy_lines(self, formatter):
+        """Copy one formatted line per selected commit to the clipboard"""
+        commits = self.selected_commits_for_copy()
+        lines = [formatter(commit) for commit in commits]
+        lines = [line for line in lines if line]
+        if lines:
+            qtutils.set_clipboard('\n'.join(lines))
+
     def copy_title_to_clipboard(self):
         """Copy the selected commit titles to the clipboard, one per line"""
-        titles = [commit.summary for commit in self.selected_commits_for_copy()]
-        if titles:
-            qtutils.set_clipboard('\n'.join(titles))
+        self._copy_lines(lambda commit: commit.summary)
+
+    def copy_oneline_to_clipboard(self):
+        """Copy the selected commits as `git log --oneline` lines"""
+        abbrev = prefs.abbrev(self.context)
+        self._copy_lines(lambda commit: f'{commit.oid[:abbrev]} {commit.summary}')
+
+    def copy_link_to_clipboard(self):
+        """Copy the web URL of each selected commit, one per line"""
+        context = self.context
+        self._copy_lines(lambda commit: gitcmds.commit_web_url(context, commit.oid))
+
+    def copy_markdown_link_to_clipboard(self):
+        """Copy each selected commit as a Markdown link: [abbrev](url) title"""
+        context = self.context
+        abbrev = prefs.abbrev(self.context)
+
+        def fmt(commit):
+            url = gitcmds.commit_web_url(context, commit.oid)
+            if not url:
+                return ''
+            return f'[{commit.oid[:abbrev]}]({url}) {commit.summary}'
+
+        self._copy_lines(fmt)
 
     def copy_message_to_clipboard(self):
         """Copy the selected commit messages to the clipboard"""
@@ -414,9 +443,15 @@ class ViewerMixin:
         self.menu_actions['copy_short'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
-        self.menu_actions['copy_title'].setEnabled(
-            has_single_selection_or_clicked and has_oid
-        )
+        for name in (
+            'copy_title',
+            'copy_oneline',
+            'copy_link',
+            'copy_markdown_link',
+        ):
+            self.menu_actions[name].setEnabled(
+                has_single_selection_or_clicked and has_oid
+            )
         self.menu_actions['copy_message'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
@@ -505,8 +540,11 @@ class ViewerMixin:
         menu.addAction(self.menu_actions['copy_short'])
         menu.addAction(self.menu_actions['copy'])
         menu.addAction(self.menu_actions['copy_title'])
+        menu.addAction(self.menu_actions['copy_oneline'])
         menu.addAction(self.menu_actions['copy_message'])
         menu.addAction(self.menu_actions['copy_message_unwrapped'])
+        menu.addAction(self.menu_actions['copy_link'])
+        menu.addAction(self.menu_actions['copy_markdown_link'])
         menu.exec_(self.mapToGlobal(event.pos()))
 
 
@@ -715,6 +753,16 @@ def viewer_actions(widget, proxy):
                 widget,
                 N_('Copy Commit Title'),
                 proxy.copy_title_to_clipboard,
+                hotkeys.COPY_COMMIT_TITLE,
+            ),
+        ),
+        'copy_oneline': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit (Short) and Title'),
+                proxy.copy_oneline_to_clipboard,
+                hotkeys.COPY_COMMIT_ONELINE,
             ),
         ),
         'copy_message': set_icon(
@@ -723,6 +771,24 @@ def viewer_actions(widget, proxy):
                 widget,
                 N_('Copy Commit Message'),
                 proxy.copy_message_to_clipboard,
+                hotkeys.COPY_COMMIT_MESSAGE,
+            ),
+        ),
+        'copy_link': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit Link'),
+                proxy.copy_link_to_clipboard,
+                hotkeys.COPY_COMMIT_LINK,
+            ),
+        ),
+        'copy_markdown_link': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit Link (Markdown)'),
+                proxy.copy_markdown_link_to_clipboard,
             ),
         ),
         'copy_message_unwrapped': set_icon(
@@ -1509,8 +1575,6 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.graph_delegate = GraphDelegate(self)
         self.context = context
         self.oidmap = {}
-        self.menu_actions = None
-        self.selecting = False
         self.commits = []
         self._column_init_state = ColumnInitState.NONE
         self.action_up = qtutils.add_action(
@@ -1998,45 +2062,48 @@ class GitDAG(standard.MainWindow):
 
         self.treewidget.menu_actions = viewer_actions(self.treewidget, self.proxy)
         self.graphview.menu_actions = viewer_actions(self.graphview, self.proxy)
-        self.diffwidget_copy_commit = set_icon(
-            icons.copy(),
-            qtutils.add_action(
-                self.diffwidget.diff,
-                N_('Copy Commit'),
-                self.treewidget.copy_to_clipboard,
-                hotkeys.COPY_COMMIT_ID,
-            ),
-        )
-        self.diffwidget_copy_title = set_icon(
-            icons.copy(),
-            qtutils.add_action(
-                self.diffwidget.diff,
+        # The diff panel offers the same clipboard actions as the commit list.
+        # The hotkeys are bound there too so they work while the diff has focus.
+        tree = self.treewidget
+        self.diffwidget_copy_actions = []
+        for title, func, hotkey in (
+            (N_('Copy Commit'), tree.copy_to_clipboard, hotkeys.COPY_COMMIT_ID),
+            (
                 N_('Copy Commit Title'),
-                self.treewidget.copy_title_to_clipboard,
+                tree.copy_title_to_clipboard,
+                hotkeys.COPY_COMMIT_TITLE,
             ),
-        )
-        self.diffwidget_copy_message = set_icon(
-            icons.copy(),
-            qtutils.add_action(
-                self.diffwidget.diff,
+            (
+                N_('Copy Commit (Short) and Title'),
+                tree.copy_oneline_to_clipboard,
+                hotkeys.COPY_COMMIT_ONELINE,
+            ),
+            (
                 N_('Copy Commit Message'),
-                self.treewidget.copy_message_to_clipboard,
+                tree.copy_message_to_clipboard,
+                hotkeys.COPY_COMMIT_MESSAGE,
             ),
-        )
-        self.diffwidget_copy_message_unwrapped = set_icon(
-            icons.copy(),
-            qtutils.add_action(
-                self.diffwidget.diff,
+            (
                 N_('Copy Commit Message (Unwrapped)'),
-                self.treewidget.copy_message_unwrapped_to_clipboard,
+                tree.copy_message_unwrapped_to_clipboard,
+                None,
             ),
-        )
-        self.diffwidget.diff.menu_actions.extend((
-            self.diffwidget_copy_commit,
-            self.diffwidget_copy_title,
-            self.diffwidget_copy_message,
-            self.diffwidget_copy_message_unwrapped,
-        ))
+            (
+                N_('Copy Commit Link'),
+                tree.copy_link_to_clipboard,
+                hotkeys.COPY_COMMIT_LINK,
+            ),
+            (
+                N_('Copy Commit Link (Markdown)'),
+                tree.copy_markdown_link_to_clipboard,
+                None,
+            ),
+        ):
+            args = (hotkey,) if hotkey is not None else ()
+            action = qtutils.add_action(self.diffwidget.diff, title, func, *args)
+            self.diffwidget_copy_actions.append(set_icon(icons.copy(), action))
+        self.diffwidget_copy_commit = self.diffwidget_copy_actions[0]
+        self.diffwidget.diff.menu_actions.extend(self.diffwidget_copy_actions)
 
         self.controls_layout = qtutils.hbox(
             defs.no_margin,
@@ -2431,7 +2498,8 @@ class GitDAG(standard.MainWindow):
         """Commits were selected"""
         self.selection = commits
         enabled = bool(commits)
-        self.diffwidget_copy_commit.setEnabled(enabled)
+        for action in self.diffwidget_copy_actions:
+            action.setEnabled(enabled)
 
     def clear(self):
         """Clear the view and the list of known commits"""
