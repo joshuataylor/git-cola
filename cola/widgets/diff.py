@@ -25,6 +25,7 @@ from .. import hotkeys
 from .. import icons
 from .. import intraline_diff
 from .. import qtutils
+from .. import textwrap
 from .. import utils
 from ..editpatch import edit_patch
 from ..i18n import N_
@@ -1368,6 +1369,12 @@ class Options(QtWidgets.QWidget):
         self.enable_word_wrapping = qtutils.add_action_bool(
             self, N_('Enable word wrapping'), self.set_word_wrapping, True
         )
+        # Only meaningful for the CommitDiffWidget, which renders the commit
+        # message above the diff. Hidden until show_commit_options() is called.
+        self.unwrap_commit_message = qtutils.add_action_bool(
+            self, N_('Unwrap commit message'), self.set_unwrap_commit_message, False
+        )
+        self.unwrap_commit_message.setVisible(False)
         self.max_diff_label = QtWidgets.QLabel(
             N_('Maximum diff size in megabytes (MB)'), self
         )
@@ -1509,6 +1516,7 @@ class Options(QtWidgets.QWidget):
         menu.addAction(self.show_filenames)
         menu.addSeparator()
         menu.addAction(self.enable_word_wrapping)
+        menu.addAction(self.unwrap_commit_message)
         menu.addSeparator()
         menu.addAction(self.intraline_diff_timing)
 
@@ -1630,6 +1638,14 @@ class Options(QtWidgets.QWidget):
     def set_word_wrapping(self, value):
         """Respond to Qt action callbacks"""
         self.widget.set_word_wrapping(value, update=False)
+
+    def set_unwrap_commit_message(self, value):
+        """Respond to Qt action callbacks"""
+        self.widget.set_unwrap_commit_message(value, update=False)
+
+    def show_commit_options(self):
+        """Show options that only apply to the CommitDiffWidget"""
+        self.unwrap_commit_message.setVisible(True)
 
     def hide_advanced_options(self):
         """Hide advanced options that are not applicable to the CommitDiffWidget"""
@@ -2289,6 +2305,27 @@ class AuthorLabel(PlainTextLabel):
         super().context_menu_actions(menu)
 
 
+def split_commit_body(diff):
+    """Split diff_range() output into its (commit body, diff) parts
+
+    gitcmds.diff_range() prefixes the diff with the commit body followed by a
+    blank line. The diff proper starts at the first "diff " header line; text
+    without one is all body.
+    """
+    match = re.search(r'^diff ', diff, re.MULTILINE)
+    if match is None:
+        return diff, ''
+    return diff[: match.start()], diff[match.start() :]
+
+
+def unwrap_commit_body(diff):
+    """Unwrap the commit body paragraphs that precede a diff"""
+    body, rest = split_commit_body(diff)
+    if not body:
+        return diff
+    return textwrap.unwrap(body) + rest
+
+
 class CommitDiffWidget(QtWidgets.QWidget):
     """Display commit metadata and text diffs"""
 
@@ -2340,6 +2377,10 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # pseudo-commits (WORKTREE/STAGE) are never cached, and the whole cache
         # is dropped whenever the DAG reloads (see clear_diff_cache).
         self._diff_cache = collections.OrderedDict()
+        # Raw text of the diff currently on display, so that toggling the
+        # commit message unwrap option can re-render without re-running git.
+        self._displayed_diff = None
+        self._unwrap_commit_message = False
 
         author_font = QtGui.QFont(self.font())
         author_font.setPointSize(int(author_font.pointSize() * 1.1))
@@ -2388,6 +2429,32 @@ class CommitDiffWidget(QtWidgets.QWidget):
     def set_word_wrapping(self, enabled, update=False):
         """Enable and disable word wrapping"""
         self.diff.set_word_wrapping(enabled, update=update)
+
+    def set_unwrap_commit_message(self, enabled, update=False):
+        """Enable and disable unwrapping of the displayed commit message"""
+        enabled = bool(enabled)
+        if update and self.options is not None:
+            with qtutils.BlockSignals(self.options.unwrap_commit_message):
+                self.options.unwrap_commit_message.setChecked(enabled)
+        if enabled == self._unwrap_commit_message:
+            return
+        self._unwrap_commit_message = enabled
+        if self._displayed_diff is not None:
+            self.diff.save_scrollbar()
+            self._render_diff(self._displayed_diff)
+
+    def _render_diff(self, diff):
+        """Render raw diff text, unwrapping the commit message when enabled"""
+        self._displayed_diff = diff
+        # An external diff command (e.g. difftastic) produces ANSI-coloured,
+        # non-unified output. Render it as ANSI rather than feeding it to the
+        # unified-diff highlighter.
+        if prefs.dag_diff_command(self.context) and ansi.has_ansi(diff):
+            self.diff.set_ansi_diff(diff)
+            return
+        if self._unwrap_commit_message:
+            diff = unwrap_commit_body(diff)
+        self.diff.set_diff(diff)
 
     def set_intraline_diff_preset(self, preset, update=False):
         """Enable and disable intra-line diff timing logs."""
@@ -2529,13 +2596,7 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # Drop results from superseded tasks; only the latest token applies.
         if token is not None and token != self._diff_token:
             return
-        # An external diff command (e.g. difftastic) produces ANSI-coloured,
-        # non-unified output. Render it as ANSI rather than feeding it to the
-        # unified-diff highlighter.
-        if prefs.dag_diff_command(self.context) and ansi.has_ansi(diff):
-            self.diff.set_ansi_diff(diff)
-        else:
-            self.diff.set_diff(diff)
+        self._render_diff(diff)
         # A file was clicked in the tree: reveal its diff, not the commit
         # message that precedes it.
         if token is not None and token == self._scroll_to_header_token:
