@@ -204,59 +204,59 @@ class TextWrapper:
         return '\n'.join(self.wrap(text))
 
 
+# Acked-by:, Signed-off-by:, Helped-by:, etc.
+SPECIAL_TAG_RGX = re.compile(
+    r'^('
+    r'(('
+    r'Acked-by|'
+    r"Ack'd-by|"
+    r'Based-on-patch-by|'
+    r'Cheered-on-by|'
+    r'Co-authored-by|'
+    r'Comments-by|'
+    r'Confirmed-by|'
+    r'Contributions-by|'
+    r'Debugged-by|'
+    r'Discovered-by|'
+    r'Explained-by|'
+    r'Backtraced-by|'
+    r'Helped-by|'
+    r'Liked-by|'
+    r'Link|'
+    r'Improved-by|'
+    r'Inspired-by|'
+    r'Initial-patch-by|'
+    r'Noticed-by|'
+    r'Original-patch-by|'
+    r'Originally-by|'
+    r'Mentored-by|'
+    r'Patch-by|'
+    r'Proposed-by|'
+    r'References|'
+    r'Related-to|'
+    r'Reported-by|'
+    r'Requested-by|'
+    r'Reviewed-by|'
+    r'See-also|'
+    r'Signed-off-by|'
+    r'Signed-Off-by|'
+    r'Spotted-by|'
+    r'Suggested-by|'
+    r'Tested-by|'
+    r'Tested-on-([a-zA-Z-_]+)-by|'
+    r'With-suggestions-by'
+    r'):)'
+    r'|([Cc]\.\s*[Ff]\.\s+)'
+    r')'
+)
+
+
 def word_wrap(
     text: str, tabwidth: int, limit: int, break_on_hyphens: bool = False
 ) -> str:
     """Wrap long lines to the specified limit"""
 
     lines = []
-
-    # Acked-by:, Signed-off-by:, Helped-by:, etc.
-    special_tag_rgx = re.compile(
-        r'^('
-        r'(('
-        r'Acked-by|'
-        r"Ack'd-by|"
-        r'Based-on-patch-by|'
-        r'Cheered-on-by|'
-        r'Co-authored-by|'
-        r'Comments-by|'
-        r'Confirmed-by|'
-        r'Contributions-by|'
-        r'Debugged-by|'
-        r'Discovered-by|'
-        r'Explained-by|'
-        r'Backtraced-by|'
-        r'Helped-by|'
-        r'Liked-by|'
-        r'Link|'
-        r'Improved-by|'
-        r'Inspired-by|'
-        r'Initial-patch-by|'
-        r'Noticed-by|'
-        r'Original-patch-by|'
-        r'Originally-by|'
-        r'Mentored-by|'
-        r'Patch-by|'
-        r'Proposed-by|'
-        r'References|'
-        r'Related-to|'
-        r'Reported-by|'
-        r'Requested-by|'
-        r'Reviewed-by|'
-        r'See-also|'
-        r'Signed-off-by|'
-        r'Signed-Off-by|'
-        r'Spotted-by|'
-        r'Suggested-by|'
-        r'Tested-by|'
-        r'Tested-on-([a-zA-Z-_]+)-by|'
-        r'With-suggestions-by'
-        r'):)'
-        r'|([Cc]\.\s*[Ff]\.\s+)'
-        r')'
-    )
-
     wrapper = TextWrapper(
         width=limit,
         tabwidth=tabwidth,
@@ -265,12 +265,58 @@ def word_wrap(
     )
 
     for line in text.split('\n'):
-        if special_tag_rgx.match(line):
+        if SPECIAL_TAG_RGX.match(line):
             lines.append(line)
         else:
             lines.append(wrapper.fill(line))
 
     return '\n'.join(lines)
+
+
+# Lines that are structure rather than prose: list items, quotes, fences,
+# headings. unwrap() leaves these alone instead of joining them.
+STRUCTURED_LINE_RGX = re.compile(r'^([-*+]\s|\d+[.)]\s|>|```|#)')
+
+
+def is_prose_line(line: str) -> bool:
+    """Is this a plain prose line that unwrap() may join with its neighbours?"""
+    if not line.strip():
+        return False
+    if line[0].isspace():
+        return False
+    if SPECIAL_TAG_RGX.match(line):
+        return False
+    if STRUCTURED_LINE_RGX.match(line):
+        return False
+    return True
+
+
+def unwrap(text: str) -> str:
+    """Join hard-wrapped prose lines back into single-line paragraphs
+
+    This is the inverse of word_wrap(). Only consecutive plain prose lines
+    are joined. Blank lines, indented lines, list items, quotes, fences and
+    Signed-off-by: style trailers are emitted verbatim and end the run of
+    lines being joined.
+    """
+    lines = []
+    run = []
+    for line in text.split('\n'):
+        if is_prose_line(line):
+            run.append(line.rstrip())
+            continue
+        if run:
+            lines.append(' '.join(run))
+            run = []
+        lines.append(line)
+    if run:
+        lines.append(' '.join(run))
+    return '\n'.join(lines)
+
+
+def rewrap(text: str, tabwidth: int, limit: int) -> str:
+    """Unwrap paragraphs and then wrap them again at the specified limit"""
+    return word_wrap(unwrap(text), tabwidth, limit)
 
 
 def is_blank(string: str):
