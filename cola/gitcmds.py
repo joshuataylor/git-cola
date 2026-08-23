@@ -80,6 +80,37 @@ def remote_url(context: ApplicationContext, remote: str, push: bool = False) -> 
     return url
 
 
+def repository_web_url(context: ApplicationContext) -> str:
+    """Return the https web URL for the repository, derived from its remotes
+
+    "origin" is preferred, then the remaining remotes in order. Both
+    https:// and scp-style ssh URLs are understood. Returns '' when no remote
+    yields a usable host and path.
+    """
+    remotes = context.model.remotes
+    for remote in sorted(remotes, key=lambda remote: remote != 'origin'):
+        url = remote_url(context, remote)
+        host = utils.get_hostname_from_url(url)
+        path = utils.get_path_from_url(url)
+        if host and path:
+            return f'https://{host}/{path}'
+    return ''
+
+
+def commit_web_url(context: ApplicationContext, oid: str) -> str:
+    """Return the web URL for a commit, or '' when the repository has none
+
+    GitHub, GitLab, Gitea and Codeberg all serve /commit/<oid>; Bitbucket
+    uses /commits/<oid>.
+    """
+    base = repository_web_url(context)
+    if not base:
+        return ''
+    host = utils.get_hostname_from_url(base) or ''
+    segment = 'commits' if 'bitbucket' in host else 'commit'
+    return f'{base}/{segment}/{oid}'
+
+
 def diff_index_filenames(context: ApplicationContext, ref: Any) -> Any:
     """
     Return a diff of filenames that have been modified relative to the index

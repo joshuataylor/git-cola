@@ -1,5 +1,6 @@
 """Test the cola.gitcmds module"""
 import os
+from unittest.mock import MagicMock
 
 from cola import core
 from cola import gitcmds
@@ -347,3 +348,37 @@ def test_oid_diff_renders_renames_with_both_paths(app_context):
     out = gitcmds.oid_diff(app_context, oid, filename=('second.txt', 'first.txt'))
     assert 'rename from first.txt' in out
     assert 'rename to second.txt' in out
+
+
+def _remotes_context(remotes):
+    """A minimal context whose remotes map to the given URLs"""
+    context = MagicMock()
+    context.model.remotes = list(remotes)
+    context.cfg.get.side_effect = lambda key, default='': remotes.get(
+        key.removeprefix('remote.').removesuffix('.url'), default
+    )
+    return context
+
+
+def test_repository_web_url_prefers_origin():
+    remotes = {
+        'upstream': 'https://github.com/other/repo.git',
+        'origin': 'git@github.com:git-cola/git-cola.git',
+    }
+    context = _remotes_context(remotes)
+    assert 'https://github.com/git-cola/git-cola' == gitcmds.repository_web_url(context)
+
+
+def test_commit_web_url_for_github_and_bitbucket():
+    context = _remotes_context({'origin': 'https://github.com/org/repo'})
+    assert 'https://github.com/org/repo/commit/abc' == gitcmds.commit_web_url(
+        context, 'abc'
+    )
+    context = _remotes_context({'origin': 'git@bitbucket.org:org/repo.git'})
+    assert 'https://bitbucket.org/org/repo/commits/abc' == gitcmds.commit_web_url(
+        context, 'abc'
+    )
+
+
+def test_commit_web_url_without_remotes_is_empty():
+    assert '' == gitcmds.commit_web_url(_remotes_context({}), 'abc')
