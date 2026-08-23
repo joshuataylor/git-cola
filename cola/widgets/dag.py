@@ -199,18 +199,23 @@ class ViewerMixin:
         context = self.context
         self.with_oid(lambda oid: cmds.do(cmds.Revert, context, oid))
 
-    def selected_oids_for_copy(self):
-        """Return oids for every selected commit, for the clipboard Copy actions"""
+    def selected_commits_for_copy(self):
+        """Return every selected commit, for the clipboard Copy actions"""
         items = self.selected_items()
         selected_oids = [item.commit.oid for item in items]
-        clicked_oid = self.clicked.oid if self.clicked else None
-        if clicked_oid and clicked_oid not in selected_oids:
+        clicked = self.clicked
+        if clicked and clicked.oid not in selected_oids:
             # Right-clicked a commit outside the current selection: copy just it.
-            oids = [clicked_oid]
+            commits = [clicked]
         else:
             commits = sort_by_generation([item.commit for item in items])
-            oids = [commit.oid for commit in commits]
-        return [oid for oid in oids if oid not in (dag.STAGE, dag.WORKTREE)]
+        return [
+            commit for commit in commits if commit.oid not in (dag.STAGE, dag.WORKTREE)
+        ]
+
+    def selected_oids_for_copy(self):
+        """Return oids for every selected commit, for the clipboard Copy actions"""
+        return [commit.oid for commit in self.selected_commits_for_copy()]
 
     def copy_to_clipboard(self):
         """Copy the selected commit object IDs to the clipboard"""
@@ -224,6 +229,12 @@ class ViewerMixin:
         if oids:
             abbrev = prefs.abbrev(self.context)
             qtutils.set_clipboard('\n'.join(oid[:abbrev] for oid in oids))
+
+    def copy_title_to_clipboard(self):
+        """Copy the selected commit titles to the clipboard, one per line"""
+        titles = [commit.summary for commit in self.selected_commits_for_copy()]
+        if titles:
+            qtutils.set_clipboard('\n'.join(titles))
 
     def copy_message_to_clipboard(self):
         """Copy the selected commit messages to the clipboard"""
@@ -403,6 +414,9 @@ class ViewerMixin:
         self.menu_actions['copy_short'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
+        self.menu_actions['copy_title'].setEnabled(
+            has_single_selection_or_clicked and has_oid
+        )
         self.menu_actions['copy_message'].setEnabled(
             has_single_selection_or_clicked and has_oid
         )
@@ -490,6 +504,7 @@ class ViewerMixin:
         menu.addAction(self.menu_actions['save_blob_from_parent'])
         menu.addAction(self.menu_actions['copy_short'])
         menu.addAction(self.menu_actions['copy'])
+        menu.addAction(self.menu_actions['copy_title'])
         menu.addAction(self.menu_actions['copy_message'])
         menu.addAction(self.menu_actions['copy_message_unwrapped'])
         menu.exec_(self.mapToGlobal(event.pos()))
@@ -692,6 +707,14 @@ def viewer_actions(widget, proxy):
                 N_('Copy Commit (Short)'),
                 proxy.copy_to_clipboard_short,
                 hotkeys.COPY,
+            ),
+        ),
+        'copy_title': set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                widget,
+                N_('Copy Commit Title'),
+                proxy.copy_title_to_clipboard,
             ),
         ),
         'copy_message': set_icon(
@@ -1984,6 +2007,14 @@ class GitDAG(standard.MainWindow):
                 hotkeys.COPY_COMMIT_ID,
             ),
         )
+        self.diffwidget_copy_title = set_icon(
+            icons.copy(),
+            qtutils.add_action(
+                self.diffwidget.diff,
+                N_('Copy Commit Title'),
+                self.treewidget.copy_title_to_clipboard,
+            ),
+        )
         self.diffwidget_copy_message = set_icon(
             icons.copy(),
             qtutils.add_action(
@@ -2002,6 +2033,7 @@ class GitDAG(standard.MainWindow):
         )
         self.diffwidget.diff.menu_actions.extend((
             self.diffwidget_copy_commit,
+            self.diffwidget_copy_title,
             self.diffwidget_copy_message,
             self.diffwidget_copy_message_unwrapped,
         ))
