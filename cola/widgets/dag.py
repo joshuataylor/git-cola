@@ -3,6 +3,7 @@ import collections
 import datetime
 import enum
 import functools
+import html
 import itertools
 import math
 from functools import partial
@@ -546,6 +547,17 @@ class ViewerMixin:
         menu.addAction(self.menu_actions['copy_link'])
         menu.addAction(self.menu_actions['copy_markdown_link'])
         menu.exec_(self.mapToGlobal(event.pos()))
+
+
+def format_message_tooltip(message):
+    """Render a commit message as tooltip markup
+
+    Wrapping the escaped text in <pre> keeps the author's line breaks and
+    stops QToolTip re-flowing it as rich text.
+    """
+    if not message:
+        return ''
+    return '<pre>' + html.escape(message) + '</pre>'
 
 
 def commit_message(context, oid, unwrap=False):
@@ -1575,6 +1587,12 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.graph_delegate = GraphDelegate(self)
         self.context = context
         self.oidmap = {}
+        # Full commit messages shown as hover tooltips, keyed by oid. Tooltip
+        # events run git synchronously on the GUI thread, so each message is
+        # read once and kept until the tree is cleared.
+        self._message_tooltips = {}
+        self.menu_actions = None
+        self.selecting = False
         self.commits = []
         self._column_init_state = ColumnInitState.NONE
         self.action_up = qtutils.add_action(
@@ -1816,7 +1834,38 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         """Clear the tree"""
         QtWidgets.QTreeWidget.clear(self)
         self.oidmap.clear()
+        self._message_tooltips.clear()
         self.commits = []
+
+    def event(self, event):
+        """Show the full commit message when hovering a row"""
+        if event.type() == QtCore.QEvent.ToolTip:
+            pos = event.pos()
+            item = self.itemAt(pos)
+            column = self.columnAt(pos.x())
+            # Cells with their own tooltip (e.g. the signature column) keep it.
+            if item is None or (column >= 0 and item.toolTip(column)):
+                return super().event(event)
+            text = self.message_tooltip(item.commit)
+            if text:
+                QtWidgets.QToolTip.showText(event.globalPos(), text, self)
+            else:
+                QtWidgets.QToolTip.hideText()
+            return True
+        return super().event(event)
+
+    def message_tooltip(self, commit):
+        """Return the cached tooltip markup for a commit's full message"""
+        oid = commit.oid
+        if oid in (dag.STAGE, dag.WORKTREE):
+            return ''
+        try:
+            return self._message_tooltips[oid]
+        except KeyError:
+            pass
+        message = commit_message(self.context, oid)
+        text = self._message_tooltips[oid] = format_message_tooltip(message)
+        return text
 
     def add_commits(self, commits):
         """Add commits to the tree"""
