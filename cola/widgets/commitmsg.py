@@ -200,6 +200,16 @@ class CommitMessageEditor(QtWidgets.QFrame):
         self.autowrap_action.setCheckable(True)
         self.autowrap_action.setChecked(prefs.linebreak(context))
 
+        # One-off reformatting of the extended description
+        self.unwrap_action = self.actions_menu.addAction(N_('Unwrap Paragraphs'))
+        self.unwrap_action.setToolTip(
+            N_('Join hard-wrapped lines back into single-line paragraphs')
+        )
+        self.rewrap_action = self.actions_menu.addAction(N_('Rewrap Paragraphs'))
+        self.rewrap_action.setToolTip(
+            N_('Unwrap paragraphs and wrap them again at the configured text width')
+        )
+
         # Commit message
         self.actions_menu.addSeparator()
         self.load_commitmsg_menu = self.actions_menu.addMenu(
@@ -270,6 +280,8 @@ class CommitMessageEditor(QtWidgets.QFrame):
         )
         # Handle the one-off auto-wrapping
         qtutils.connect_action_bool(self.autowrap_action, self.set_linebreak)
+        qtutils.connect_action(self.unwrap_action, self.unwrap_description)
+        qtutils.connect_action(self.rewrap_action, self.rewrap_description)
 
         self.summary.accepted.connect(self.focus_description)
         self.summary.down_pressed.connect(self.summary_cursor_down)
@@ -473,6 +485,32 @@ class CommitMessageEditor(QtWidgets.QFrame):
     def set_textwidth(self, width):
         self._textwidth = width
         self.description.set_textwidth(width)
+
+    def unwrap_description(self):
+        """Join the hard-wrapped lines in the description into paragraphs"""
+        self._replace_description(textwrap.unwrap(get(self.description)))
+
+    def rewrap_description(self):
+        """Unwrap the description and wrap it again at the text width"""
+        text = get(self.description)
+        self._replace_description(
+            textwrap.rewrap(text, self._tabwidth, self._textwidth)
+        )
+
+    def _replace_description(self, text):
+        """Replace the description text as a single undoable edit
+
+        set_value() goes through setPlainText(), which discards the undo
+        stack. A reformat is the one edit that most needs Ctrl-Z, so replace
+        the text through a cursor instead.
+        """
+        if text == get(self.description):
+            return
+        cursor = self.description.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QtGui.QTextCursor.Document)
+        cursor.insertText(text)
+        cursor.endEditBlock()
 
     def set_linebreak(self, brk):
         self._linebreak = brk

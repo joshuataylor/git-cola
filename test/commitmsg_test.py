@@ -60,3 +60,34 @@ def test_commit_button_tooltip_uses_the_native_shortcut(commit_editor):
     assert 'Commit staged changes' in tooltip
     assert native in tooltip
     assert 'Ctrl+Enter' not in tooltip
+
+
+WRAPPED = 'A paragraph that\nwas wrapped.\n\n- a list item\n\nSigned-off-by: X <x@y>'
+
+
+def test_unwrap_description_joins_paragraphs_and_is_undoable(commit_editor):
+    commit_editor.description.set_value(WRAPPED)
+    commit_editor.unwrap_description()
+
+    expect = 'A paragraph that was wrapped.\n\n- a list item\n\nSigned-off-by: X <x@y>'
+    assert expect == commit_editor.description.get()
+    assert commit_editor.description.document().isUndoAvailable()
+
+    commit_editor.description.undo()
+    assert WRAPPED == commit_editor.description.get()
+
+
+def test_rewrap_description_wraps_at_textwidth(commit_editor):
+    commit_editor.set_textwidth(16)
+    commit_editor.description.set_value('12345678901 3\n56 8 01 3 5 7')
+    commit_editor.rewrap_description()
+
+    assert '12345678901 3 56\n8 01 3 5 7' == commit_editor.description.get()
+
+
+def test_unwrap_description_is_a_no_op_when_unchanged(commit_editor):
+    commit_editor.description.set_value('already one line')
+    commit_editor.unwrap_description()
+
+    assert 'already one line' == commit_editor.description.get()
+    assert not commit_editor.description.document().isUndoAvailable()
