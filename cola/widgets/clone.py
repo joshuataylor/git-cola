@@ -136,12 +136,15 @@ class Clone(standard.Dialog):
             defs.button_spacing,
             self.shallow,
             qtutils.STRETCH,
-            self.close_button,
-            self.ok_button,
+            qtutils.button_box(self.ok_button, self.close_button),
         )
 
         self.main_layout = qtutils.vbox(
-            defs.margin, defs.spacing, self.input_layout, self.button_layout
+            defs.dialog_margin,
+            defs.control_spacing,
+            self.input_layout,
+            defs.button_row_spacing,
+            self.button_layout,
         )
         self.setLayout(self.main_layout)
 
