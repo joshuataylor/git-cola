@@ -113,13 +113,12 @@ class Merge(standard.Dialog):
             self.checkbox_commit,
             self.checkbox_sign,
             qtutils.STRETCH,
-            self.button_close,
-            self.button_merge,
+            qtutils.button_box(self.button_merge, self.button_close),
         )
 
         self.mainlayt = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.radiolayt,
             self.revisions,
             self.revlayt,
