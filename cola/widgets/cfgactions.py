@@ -83,13 +83,7 @@ class GitCommandWidget(standard.Dialog):
         self.button_close = qtutils.close_button()
 
         # Put them in a horizontal layout at the bottom.
-        self.button_box = QtWidgets.QDialogButtonBox(self)
-        self.button_box.addButton(
-            self.button_abort, QtWidgets.QDialogButtonBox.RejectRole
-        )
-        self.button_box.addButton(
-            self.button_close, QtWidgets.QDialogButtonBox.AcceptRole
-        )
+        self.button_box = qtutils.button_box(self.button_close, self.button_abort)
 
         # Connect the signals to the process
         self.proc.readyReadStandardOutput.connect(self.read_stdout)
@@ -101,7 +95,11 @@ class GitCommandWidget(standard.Dialog):
         qtutils.connect_button(self.button_close, self.close)
 
         self._layout = qtutils.vbox(
-            defs.margin, defs.spacing, self.output_text, self.button_box
+            defs.dialog_margin,
+            defs.control_spacing,
+            self.output_text,
+            defs.button_row_spacing,
+            self.button_box,
         )
         self.setLayout(self._layout)
 
@@ -247,16 +245,15 @@ class ActionDialog(standard.Dialog):
             defs.margin, defs.spacing, self.argslabel, self.argstxt
         )
 
-        self.btnlayt = qtutils.hbox(
-            defs.margin, defs.spacing, qtutils.STRETCH, self.closebtn, self.runbtn
-        )
+        self.btnlayt = qtutils.button_box(self.runbtn, self.closebtn)
 
         self.layt = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.prompt,
             self.argslayt,
             self.revselect,
+            defs.button_row_spacing,
             self.btnlayt,
         )
         self.setLayout(self.layt)

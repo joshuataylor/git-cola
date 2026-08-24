@@ -96,18 +96,15 @@ class SearchWidget(standard.Dialog):
             Qt.Vertical, self.commit_list, self.commit_text
         )
 
-        self.bottom_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.spacing,
-            qtutils.STRETCH,
-            self.button_close,
-            self.button_export,
+        self.bottom_layout = qtutils.button_box(
             self.button_cherrypick,
+            self.button_close,
+            (self.button_export, QtWidgets.QDialogButtonBox.ActionRole),
         )
 
         self.main_layout = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.top_layout,
             self.splitter,
             self.bottom_layout,

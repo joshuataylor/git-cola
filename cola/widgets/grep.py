@@ -167,14 +167,13 @@ class Grep(Dialog):
             self.refresh_button,
             self.shell_checkbox,
             qtutils.STRETCH,
-            self.close_button,
-            self.edit_button,
+            qtutils.button_box(self.edit_button, self.close_button),
         )
 
         self.splitter = qtutils.splitter(Qt.Vertical, self.result_txt, self.preview_txt)
 
         self.mainlayout = qtutils.vbox(
-            defs.margin,
+            defs.dialog_margin,
             defs.no_spacing,
             self.input_layout,
             self.splitter,
