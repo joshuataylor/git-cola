@@ -1074,7 +1074,7 @@ class MessageBox(Dialog):
             self.button_details.hide()
 
         self.info_layout = qtutils.vbox(
-            defs.large_margin,
+            defs.inner_margin,
             defs.button_spacing,
             self.text_label,
             self.info_label,
@@ -1082,24 +1082,21 @@ class MessageBox(Dialog):
         )
 
         self.top_layout = qtutils.hbox(
-            defs.large_margin,
+            defs.inner_margin,
             defs.button_spacing,
             self.logo_label,
             self.info_layout,
             qtutils.STRETCH,
         )
 
-        self.buttons_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            self.button_details,
-            qtutils.STRETCH,
-            self.button_close,
+        self.buttons_layout = qtutils.button_box(
             self.button_ok,
+            self.button_close,
+            (self.button_details, QtWidgets.QDialogButtonBox.ActionRole),
         )
 
         self.main_layout = qtutils.vbox(
-            defs.margin,
+            defs.dialog_margin,
             defs.button_spacing,
             self.top_layout,
             self.details_text,

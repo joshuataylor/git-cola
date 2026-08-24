@@ -1,4 +1,4 @@
-"""Provides the StashView dialog."""
+"""Provides the "Add to exclusions" (.gitignore) dialog."""
 
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -35,7 +35,10 @@ class AddToGitIgnore(Dialog):
         self.check_filename()
 
         self.filename_layt = qtutils.vbox(
-            defs.no_margin, defs.spacing, self.text_description, self.edit_filename
+            defs.no_margin,
+            defs.control_spacing,
+            self.text_description,
+            self.edit_filename,
         )
 
         # Create radio options
@@ -47,7 +50,7 @@ class AddToGitIgnore(Dialog):
             self.radio_filename, self.radio_pattern
         )
         self.name_radio_layt = qtutils.vbox(
-            defs.no_margin, defs.spacing, self.radio_filename, self.radio_pattern
+            defs.no_margin, defs.radio_spacing, self.radio_filename, self.radio_pattern
         )
 
         self.radio_in_repo = qtutils.radio(text=N_('Add to .gitignore'), checked=True)
@@ -56,31 +59,26 @@ class AddToGitIgnore(Dialog):
             self.radio_in_repo, self.radio_local
         )
         self.location_radio_layt = qtutils.vbox(
-            defs.no_margin, defs.spacing, self.radio_in_repo, self.radio_local
+            defs.no_margin, defs.radio_spacing, self.radio_in_repo, self.radio_local
         )
 
         # Create buttons
         self.button_apply = qtutils.ok_button(text=N_('Add'))
         self.button_close = qtutils.close_button()
-        self.btn_layt = qtutils.hbox(
-            defs.no_margin,
-            defs.spacing,
-            qtutils.STRETCH,
-            self.button_close,
-            self.button_apply,
-        )
+        self.button_box = qtutils.button_box(self.button_apply, self.button_close)
 
         # Layout
         self.main_layout = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.name_radio_layt,
-            defs.button_spacing,
+            defs.group_spacing,
             self.filename_layt,
-            defs.button_spacing,
+            defs.group_spacing,
             self.location_radio_layt,
             qtutils.STRETCH,
-            self.btn_layt,
+            defs.button_row_spacing,
+            self.button_box,
         )
         self.setLayout(self.main_layout)
 

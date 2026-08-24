@@ -169,20 +169,31 @@ class Finder(standard.Dialog):
             defs.no_margin, defs.button_spacing, self.input_label, self.input_txt
         )
 
-        self.bottom_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            self.close_button,
-            qtutils.STRETCH,
-            self.help_button,
-            self.refresh_button,
-            self.open_default_button,
-            self.edit_button,
-            self.ok_button,
-        )
+        if defs.native_dialog_buttons:
+            roles = QtWidgets.QDialogButtonBox
+            self.bottom_layout = qtutils.button_box(
+                self.ok_button,
+                self.close_button,
+                (self.help_button, roles.HelpRole),
+                (self.refresh_button, roles.ActionRole),
+                (self.open_default_button, roles.ActionRole),
+                (self.edit_button, roles.ActionRole),
+            )
+        else:
+            self.bottom_layout = qtutils.hbox(
+                defs.no_margin,
+                defs.button_spacing,
+                self.close_button,
+                qtutils.STRETCH,
+                self.help_button,
+                self.refresh_button,
+                self.open_default_button,
+                self.edit_button,
+                self.ok_button,
+            )
         self.splitter = qtutils.splitter(Qt.Horizontal, self.tree, self.browser)
         self.main_layout = qtutils.vbox(
-            defs.margin,
+            defs.dialog_margin,
             defs.no_spacing,
             self.input_layout,
             self.splitter,
