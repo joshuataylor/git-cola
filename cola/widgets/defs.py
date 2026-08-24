@@ -18,7 +18,8 @@ def metrics_for(platform):
     macOS uses the Aqua values that Qt's QMacStyle encodes in
     layoutSpacing()/pixelMetric(): 20px dialog edges, 8px between related
     controls, 5px between stacked radio buttons, 16px between groups and
-    14px between the last group and the button row.  Every other platform
+    14px between the last group and the button row, and no extra margin on
+    nested layouts.  Every other platform
     keeps the legacy 4px metrics so nothing changes outside macOS.
     """
     if platform == 'darwin':
@@ -28,6 +29,7 @@ def metrics_for(platform):
             'radio_spacing': 5,
             'group_spacing': 16,
             'button_row_spacing': 14,
+            'inner_margin': 0,
         }
     return {
         'dialog_margin': 4,
@@ -35,6 +37,7 @@ def metrics_for(platform):
         'radio_spacing': 4,
         'group_spacing': 12,
         'button_row_spacing': 12,
+        'inner_margin': 12,
     }
 
 
@@ -48,6 +51,8 @@ control_spacing = scale(_metrics['control_spacing'])
 radio_spacing = scale(_metrics['radio_spacing'])
 group_spacing = scale(_metrics['group_spacing'])
 button_row_spacing = scale(_metrics['button_row_spacing'])
+# Margin for a nested layout inside a dialog that already has dialog_margin.
+inner_margin = scale(_metrics['inner_margin'])
 
 
 no_margin = 0
