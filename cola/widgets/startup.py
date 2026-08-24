@@ -117,10 +117,10 @@ class StartupDialog(standard.Dialog):
             self.new_button,
             self.remove_button,
             qtutils.STRETCH,
-            self.close_button,
+            qtutils.button_box(None, self.close_button),
         )
 
-        self.main_layout = qtutils.grid(defs.margin, defs.spacing)
+        self.main_layout = qtutils.grid(defs.dialog_margin, defs.control_spacing)
         self.main_layout.addItem(self.logo_layout, 1, 1)
         self.main_layout.addItem(self.tab_layout, 1, 2)
         self.main_layout.addItem(self.button_layout, 2, 1, columnSpan=2)
