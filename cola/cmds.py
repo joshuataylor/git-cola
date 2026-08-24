@@ -11,8 +11,6 @@ from io import StringIO
 from typing import TYPE_CHECKING
 from typing import Any
 
-from typing_extensions import Self
-
 from qtpy import QtCore
 
 from . import compat
