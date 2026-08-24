@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 
 try:
     scale_factor = float(os.getenv('GIT_COLA_SCALE', '1'))
@@ -9,6 +10,44 @@ except ValueError:
 
 def scale(value, factor=scale_factor):
     return int(value * factor)
+
+
+def metrics_for(platform):
+    """Return the unscaled dialog layout metrics for a sys.platform name
+
+    macOS uses the Aqua values that Qt's QMacStyle encodes in
+    layoutSpacing()/pixelMetric(): 20px dialog edges, 8px between related
+    controls, 5px between stacked radio buttons, 16px between groups and
+    14px between the last group and the button row.  Every other platform
+    keeps the legacy 4px metrics so nothing changes outside macOS.
+    """
+    if platform == 'darwin':
+        return {
+            'dialog_margin': 20,
+            'control_spacing': 8,
+            'radio_spacing': 5,
+            'group_spacing': 16,
+            'button_row_spacing': 14,
+        }
+    return {
+        'dialog_margin': 4,
+        'control_spacing': 4,
+        'radio_spacing': 4,
+        'group_spacing': 12,
+        'button_row_spacing': 12,
+    }
+
+
+platform = sys.platform
+# QDialogButtonBox gives the native Accept-right/Reject-left order on macOS.
+# Other platforms keep the hand-ordered hbox so their look is unchanged.
+native_dialog_buttons = platform == 'darwin'
+_metrics = metrics_for(platform)
+dialog_margin = scale(_metrics['dialog_margin'])
+control_spacing = scale(_metrics['control_spacing'])
+radio_spacing = scale(_metrics['radio_spacing'])
+group_spacing = scale(_metrics['group_spacing'])
+button_row_spacing = scale(_metrics['button_row_spacing'])
 
 
 no_margin = 0
