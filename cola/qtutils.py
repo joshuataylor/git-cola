@@ -1018,6 +1018,53 @@ def close_button(
     return create_button(text=text, icon=icon)
 
 
+def button_box(
+    accept: QtWidgets.QPushButton | None = None,
+    reject: QtWidgets.QPushButton | None = None,
+    *others: tuple[QtWidgets.QPushButton, Any],
+) -> QtWidgets.QWidget | QtWidgets.QBoxLayout:
+    """Create a dialog button row with platform-native button ordering
+
+    `accept` and `reject` are the buttons from ok_button()/close_button().
+    `others` are (button, QDialogButtonBox.ButtonRole) pairs for buttons
+    that sit left of the accept/reject pair (ActionRole, ResetRole, HelpRole).
+
+    On macOS this returns a QDialogButtonBox so QMacStyle lays the buttons
+    out per the HIG: the default action bottom-right, Cancel/Close to its
+    left, other buttons on the far left.  Dialog push buttons on macOS are
+    text-only, so the icon and the padding space from create_button() are
+    stripped.  Elsewhere the legacy right-aligned hbox is returned unchanged
+    so non-macOS layouts are unaffected.
+
+    Signals are not connected here; callers keep their connect_button() wiring.
+    """
+    other_buttons = [button for (button, _) in others]
+    if not defs.native_dialog_buttons:
+        return hbox(
+            defs.no_margin, defs.spacing, STRETCH, *other_buttons, reject, accept
+        )
+
+    box_widget = QtWidgets.QDialogButtonBox()
+    box_widget.setContentsMargins(0, 0, 0, 0)
+    roles = QtWidgets.QDialogButtonBox
+    entries = []
+    if accept is not None:
+        entries.append((accept, roles.AcceptRole))
+    if reject is not None:
+        entries.append((reject, roles.RejectRole))
+    entries.extend(others)
+    for button, role in entries:
+        # QPushButton.autoDefault turns on once the button lives in a QDialog;
+        # only the accept button (default=True from ok_button()) should react
+        # to Return.
+        if button is not accept:
+            button.setAutoDefault(False)
+        button.setIcon(QtGui.QIcon())
+        button.setText(button.text().lstrip())
+        box_widget.addButton(button, role)
+    return box_widget
+
+
 def edit_button(enabled: bool = True, default: bool = False) -> QtWidgets.QPushButton:
     return create_button(
         text=N_('Edit'), icon=icons.edit(), enabled=enabled, default=default
