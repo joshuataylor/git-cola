@@ -488,8 +488,10 @@ def prompt_n(msg: str, inputs: Any) -> tuple[bool, list[Any]]:
 
     # layouts
     form_layout = form(defs.no_margin, defs.button_spacing, *form_widgets)
-    button_layout = hbox(defs.no_margin, defs.button_spacing, STRETCH, close_b, ok_b)
-    main_layout = vbox(defs.margin, defs.button_spacing, form_layout, button_layout)
+    button_layout = button_box(ok_b, close_b)
+    main_layout = vbox(
+        defs.dialog_margin, defs.button_spacing, form_layout, button_layout
+    )
     dialog.setLayout(main_layout)
 
     # connections

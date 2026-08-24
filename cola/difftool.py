@@ -120,18 +120,32 @@ class Difftool(standard.Dialog):
 
         self.close_button = qtutils.close_button()
 
-        self.button_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.spacing,
-            qtutils.STRETCH,
-            self.close_button,
-            self.edit_button,
-            self.diff_all_button,
-            self.diff_button,
-        )
+        if defs.native_dialog_buttons:
+            roles = QtWidgets.QDialogButtonBox
+            self.button_layout = qtutils.button_box(
+                self.diff_button,
+                self.close_button,
+                (self.edit_button, roles.ActionRole),
+                (self.diff_all_button, roles.ActionRole),
+            )
+        else:
+            self.button_layout = qtutils.hbox(
+                defs.no_margin,
+                defs.spacing,
+                qtutils.STRETCH,
+                self.close_button,
+                self.edit_button,
+                self.diff_all_button,
+                self.diff_button,
+            )
 
         self.main_layout = qtutils.vbox(
-            defs.margin, defs.spacing, self.expr, self.tree, self.button_layout
+            defs.dialog_margin,
+            defs.control_spacing,
+            self.expr,
+            self.tree,
+            defs.button_row_spacing,
+            self.button_layout,
         )
         self.setLayout(self.main_layout)
 

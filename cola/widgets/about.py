@@ -99,15 +99,18 @@ class AboutView(QtWidgets.QDialog):
             qtutils.STRETCH,
         )
 
-        self.button_layout = qtutils.hbox(
-            defs.spacing, defs.margin, qtutils.STRETCH, self.close_button
-        )
+        self.button_layout = qtutils.button_box(None, self.close_button)
 
+        # The logo and tabs sit flush against the window edge; only macOS
+        # gets the HIG dialog margin so the Close button is not jammed
+        # into the corner.
+        margin = defs.dialog_margin if defs.native_dialog_buttons else defs.no_margin
         self.main_layout = qtutils.vbox(
-            defs.no_margin,
-            defs.spacing,
+            margin,
+            defs.control_spacing,
             self.logo_layout,
             self.tabs,
+            defs.button_row_spacing,
             self.button_layout,
         )
         self.setLayout(self.main_layout)

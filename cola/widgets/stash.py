@@ -113,12 +113,12 @@ class StashView(standard.Dialog):
             self.help_button,
             self.recreate_index,
             qtutils.STRETCH,
-            self.close_button,
+            qtutils.button_box(None, self.close_button),
         )
 
         self.main_layt = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.splitter,
             self.action_layout,
             self.bottom_layout,

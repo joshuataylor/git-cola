@@ -919,9 +919,7 @@ class PreferencesView(standard.Dialog):
 
         self.close_button = qtutils.close_button()
 
-        self.button_layout = qtutils.hbox(
-            defs.no_margin, defs.spacing, qtutils.STRETCH, self.close_button
-        )
+        self.button_layout = qtutils.button_box(None, self.close_button)
         # If the user already has the user.email and user.name configured then default
         # to editing the current repo's config instead of the user-wide settings.
         if context.cfg.get(prefs.USER_NAME) and context.cfg.get(prefs.USER_EMAIL):
@@ -932,10 +930,11 @@ class PreferencesView(standard.Dialog):
         self.tab_bar.setCurrentIndex(index)
 
         self.main_layout = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.tab_bar,
             self.stack_widget,
+            defs.button_row_spacing,
             self.button_layout,
         )
         self.setLayout(self.main_layout)
