@@ -86,7 +86,7 @@ class SelectCommits(Dialog):
         )
 
         self.main_layout = qtutils.vbox(
-            defs.margin, defs.margin, self.input_layout, self.splitter
+            defs.dialog_margin, defs.control_spacing, self.input_layout, self.splitter
         )
         self.setLayout(self.main_layout)
 

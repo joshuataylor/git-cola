@@ -124,16 +124,16 @@ class AddSubmodule(standard.Dialog):
             (N_('Depth'), self.depth_spinbox),
             (N_('Reference Repository'), self.reference_text),
         )
-        self.button_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            qtutils.STRETCH,
-            self.close_button,
-            self.add_button,
-        )
+        self.button_layout = qtutils.button_box(self.add_button, self.close_button)
 
+        # This dialog always had a roomier 12px margin; macOS gets the HIG value.
+        margin = defs.dialog_margin if defs.native_dialog_buttons else defs.large_margin
         self.main_layout = qtutils.vbox(
-            defs.large_margin, defs.spacing, self.form_layout, self.button_layout
+            margin,
+            defs.control_spacing,
+            self.form_layout,
+            defs.button_row_spacing,
+            self.button_layout,
         )
         self.setLayout(self.main_layout)
         self.init_size(parent=qtutils.active_window())

@@ -121,14 +121,13 @@ class RemoteEditor(standard.Dialog):
         width = self._top_layout.width()
         self._top_layout.setSizes([width // 4, width * 3 // 4])
 
-        self._button_layout = qtutils.hbox(
-            defs.margin,
-            defs.spacing,
-            qtutils.STRETCH,
-            self.close_button,
-        )
+        self._button_layout = qtutils.button_box(None, self.close_button)
         self._layout = qtutils.vbox(
-            defs.margin, defs.spacing, self._top_layout, self._button_layout
+            defs.dialog_margin,
+            defs.control_spacing,
+            self._top_layout,
+            defs.button_row_spacing,
+            self._button_layout,
         )
         self.setLayout(self._layout)
 
@@ -418,16 +417,14 @@ class AddRemoteDialog(QtWidgets.QDialog):
         )
         self.close_button = qtutils.close_button()
 
-        self._button_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            qtutils.STRETCH,
-            self.close_button,
-            self.add_button,
-        )
+        self._button_layout = qtutils.button_box(self.add_button, self.close_button)
 
         self._layout = qtutils.vbox(
-            defs.margin, defs.spacing, self.widget, self._button_layout
+            defs.dialog_margin,
+            defs.control_spacing,
+            self.widget,
+            defs.button_row_spacing,
+            self._button_layout,
         )
         self.setLayout(self._layout)
 
