@@ -299,6 +299,7 @@ class RemoteActionDialog(standard.Dialog):
 
         self.action_button = qtutils.ok_button(title, icon=icon)
         self.close_button = qtutils.close_button()
+        self.button_box = qtutils.button_box(self.action_button, self.close_button)
         self.buttons_group = utils.Group(self.close_button, self.action_button)
         self.inputs_group = utils.Group(
             self.close_on_completion_checkbox,
@@ -354,8 +355,7 @@ class RemoteActionDialog(standard.Dialog):
             self.remote_messages_checkbox,
             qtutils.STRETCH,
             self.progress,
-            self.close_button,
-            self.action_button,
+            self.button_box,
         )
 
         self.remote_input_layout = qtutils.vbox(
@@ -388,8 +388,8 @@ class RemoteActionDialog(standard.Dialog):
         self.top_layout = qtutils.hbox(defs.no_margin, defs.spacing, *widgets)
 
         self.main_layout = qtutils.vbox(
-            defs.margin,
-            defs.spacing,
+            defs.dialog_margin,
+            defs.control_spacing,
             self.top_layout,
             self.command_display,
             self.options_layout,

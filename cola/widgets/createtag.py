@@ -100,16 +100,14 @@ class CreateTag(standard.Dialog):
             (self.sign_label, self.sign_tag),
         )
 
-        self.button_layout = qtutils.hbox(
-            defs.no_margin,
-            defs.button_spacing,
-            qtutils.STRETCH,
-            self.close_button,
-            self.create_button,
-        )
+        self.button_layout = qtutils.button_box(self.create_button, self.close_button)
 
         self.main_layt = qtutils.vbox(
-            defs.margin, defs.spacing, self.input_layout, self.button_layout
+            defs.dialog_margin,
+            defs.control_spacing,
+            self.input_layout,
+            defs.button_row_spacing,
+            self.button_layout,
         )
         self.setLayout(self.main_layt)
 
