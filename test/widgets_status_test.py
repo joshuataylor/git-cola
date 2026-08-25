@@ -193,3 +193,56 @@ def test_unchanged_refresh_preserves_the_selection(widget):
     assert _selected_untracked(widget) == ['b']
     parent = widget.topLevelItem(status.UNTRACKED_IDX)
     assert widget.currentItem() is parent.child(1)
+
+
+def _selected_children(widget, idx):
+    parent = widget.topLevelItem(idx)
+    return [
+        parent.child(i).text(0)
+        for i in range(parent.childCount())
+        if parent.child(i).isSelected()
+    ]
+
+
+def test_select_all_scopes_to_current_category_and_focuses_header(widget):
+    """Select All picks the current item's category and focuses its header."""
+    widget._model.set_contents(modified=['m1', 'm2', 'm3'], untracked=['u1', 'u2'])
+    widget.refresh()
+
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified.child(modified.childCount() - 1))
+
+    widget.selectAll()
+
+    assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2', 'm3']
+    assert _selected_children(widget, status.UNTRACKED_IDX) == []
+    assert widget.currentItem() is modified
+
+
+def test_select_all_from_header_selects_that_category(widget):
+    """Select All while a header is current selects that whole category."""
+    widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
+    widget.refresh()
+
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified)
+
+    widget.selectAll()
+
+    assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2']
+    assert _selected_children(widget, status.UNTRACKED_IDX) == []
+    assert widget.currentItem() is modified
+
+
+def test_select_all_with_no_current_item_uses_first_non_empty_category(widget):
+    """With nothing focused, Select All falls back to the first category."""
+    widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
+    widget.refresh()
+    widget.setCurrentItem(None)
+
+    widget.selectAll()
+
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2']
+    assert _selected_children(widget, status.UNTRACKED_IDX) == []
+    assert widget.currentItem() is modified
