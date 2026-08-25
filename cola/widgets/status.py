@@ -1211,7 +1211,14 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             return
 
         # A header item e.g. 'Staged', 'Modified', etc.
-        category, idx = selected_indexes[0]
+        # Prefer the current item when it is a category header, so selecting a
+        # whole category (e.g. Select All) shows the category summary rather
+        # than a single file diff.
+        current = self.current_item()
+        if current is not None and current[0] == HEADER_IDX:
+            category, idx = current
+        else:
+            category, idx = selected_indexes[0]
         header = category == HEADER_IDX
         if header:
             cls = {
@@ -1280,6 +1287,13 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
     def select_header(self):
         """Select an active header, which triggers a diffstat"""
+        item = self._first_category_with_children()
+        if item is not None:
+            self.clearSelection()
+            self.setCurrentItem(item)
+
+    def _first_category_with_children(self):
+        """Return the first non-empty top-level category item"""
         for idx in (
             STAGED_IDX,
             UNMERGED_IDX,
@@ -1287,10 +1301,38 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             UNTRACKED_IDX,
         ):
             item = self.topLevelItem(idx)
-            if item.childCount() > 0:
-                self.clearSelection()
-                self.setCurrentItem(item)
-                return
+            if item is not None and item.childCount() > 0:
+                return item
+        return None
+
+    def selectAll(self):
+        """Select every file in the current category and focus its header.
+
+        Cmd+A / Ctrl+A is routed here by the main window's edit_proxy. Rather
+        than selecting every file across all categories (the inherited
+        QTreeWidget behaviour), select only the category the current item
+        belongs to and make that category's header the current item, so the
+        native Down arrow moves to the first child instead of skipping past the
+        selection.
+        """
+        current = self.current_item()
+        if current is None:
+            # Nothing is focused yet: fall back to the first non-empty category.
+            parent = self._first_category_with_children()
+        else:
+            category, idx = current
+            toplevel_idx = idx if category == HEADER_IDX else category
+            parent = self.topLevelItem(toplevel_idx)
+        if parent is None or parent.childCount() == 0:
+            return
+        with qtutils.BlockSignals(self):
+            # setCurrentItem() first (it clears+selects the header), then add the
+            # children so the whole category ends up selected, header current.
+            self.setCurrentItem(parent)
+            parent.setSelected(True)
+            for i in range(parent.childCount()):
+                parent.child(i).setSelected(True)
+        self.show_selection()
 
     def move_up(self):
         """Select the item above the currently selected item"""
