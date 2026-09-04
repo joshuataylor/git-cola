@@ -643,17 +643,58 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         # Sections whose (path, deleted) contents are unchanged keep their
         # items. When nothing rebuilt, the Qt selection and scrollbars were
         # never touched, so the restore passes (and their next-item
-        # heuristics) have nothing to do and are skipped.
-        changed = self._set_staged(self._model.staged)
-        changed = self._set_modified(self._model.modified) or changed
-        changed = self._set_unmerged(self._model.unmerged) or changed
-        changed = self._set_untracked(self._model.untracked) or changed
+        # heuristics) have nothing to do and are skipped. Each _set_* returns
+        # True when that section's items were rebuilt.
+        staged_changed = self._set_staged(self._model.staged)
+        modified_changed = self._set_modified(self._model.modified)
+        unmerged_changed = self._set_unmerged(self._model.unmerged)
+        untracked_changed = self._set_untracked(self._model.untracked)
+        changed = (
+            staged_changed or modified_changed or unmerged_changed or untracked_changed
+        )
         if changed:
             self._update_column_widths()
         self._update_actions()
         if changed:
             self._restore_selection()
             self._restore_scrollbars()
+        # A file's on-disk content can change without altering any
+        # (path, deleted) fingerprint (e.g. editing an already-modified file).
+        # When the section holding the current selection was not rebuilt,
+        # _restore_selection() did not re-run the diff -- reselecting the
+        # already-current item emits no itemSelectionChanged -- so the diff
+        # pane keeps stale text. Recompute the diff for the current selection
+        # when nothing re-triggered it above.
+        self._refresh_selection_diff(
+            {
+                STAGED_IDX: staged_changed,
+                UNMERGED_IDX: unmerged_changed,
+                MODIFIED_IDX: modified_changed,
+                UNTRACKED_IDX: untracked_changed,
+            },
+            changed,
+        )
+
+    def _refresh_selection_diff(self, section_changed, changed):
+        """Re-run the diff for the current selection when refresh() did not.
+
+        _restore_selection() re-triggers the diff only when it actually moves
+        the Qt current/selected item: for a file that means the file's own
+        section was rebuilt; for a header it means _restore_selection() ran at
+        all (changed). In every other case the on-disk content may have shifted
+        under an unchanged path list, so recompute here. Skip when nothing is
+        selected.
+        """
+        selected = self.selected_indexes()
+        if not selected:
+            return
+        category = selected[0][0]
+        if category == HEADER_IDX:
+            already_refreshed = changed
+        else:
+            already_refreshed = section_changed.get(category, False)
+        if not already_refreshed:
+            self.show_selection()
 
     def _update_actions(self, selected=None):
         if selected is None:
@@ -1211,14 +1252,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             return
 
         # A header item e.g. 'Staged', 'Modified', etc.
-        # Prefer the current item when it is a category header, so selecting a
-        # whole category (e.g. Select All) shows the category summary rather
-        # than a single file diff.
-        current = self.current_item()
-        if current is not None and current[0] == HEADER_IDX:
-            category, idx = current
-        else:
-            category, idx = selected_indexes[0]
+        category, idx = selected_indexes[0]
         header = category == HEADER_IDX
         if header:
             cls = {
@@ -1306,32 +1340,34 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         return None
 
     def selectAll(self):
-        """Select every file in the current category and focus its header.
+        """Select every file across all categories.
 
-        Cmd+A / Ctrl+A is routed here by the main window's edit_proxy. Rather
-        than selecting every file across all categories (the inherited
-        QTreeWidget behaviour), select only the category the current item
-        belongs to and make that category's header the current item, so the
-        native Down arrow moves to the first child instead of skipping past the
-        selection.
+        Cmd+A / Ctrl+A is routed here by the main window's edit_proxy. Select
+        every file in all four categories (Staged, Unmerged, Modified,
+        Untracked), then make the first selected file the current item so the
+        native Down arrow navigates the selection instead of skipping past it --
+        the reason a custom override is needed rather than Qt's native
+        selectAll().
         """
-        current = self.current_item()
-        if current is None:
-            # Nothing is focused yet: fall back to the first non-empty category.
-            parent = self._first_category_with_children()
-        else:
-            category, idx = current
-            toplevel_idx = idx if category == HEADER_IDX else category
-            parent = self.topLevelItem(toplevel_idx)
-        if parent is None or parent.childCount() == 0:
+        categories = (STAGED_IDX, UNMERGED_IDX, MODIFIED_IDX, UNTRACKED_IDX)
+        first = None
+        for top_idx in categories:
+            parent = self.topLevelItem(top_idx)
+            if parent is not None and parent.childCount() > 0:
+                first = parent.child(0)
+                break
+        if first is None:
             return
         with qtutils.BlockSignals(self):
-            # setCurrentItem() first (it clears+selects the header), then add the
-            # children so the whole category ends up selected, header current.
-            self.setCurrentItem(parent)
-            parent.setSelected(True)
-            for i in range(parent.childCount()):
-                parent.child(i).setSelected(True)
+            # setCurrentItem() clears+selects the first file; the loop then adds
+            # the rest, leaving every file selected and the first file current.
+            self.setCurrentItem(first)
+            for top_idx in categories:
+                parent = self.topLevelItem(top_idx)
+                if parent is None:
+                    continue
+                for i in range(parent.childCount()):
+                    parent.child(i).setSelected(True)
         self.show_selection()
 
     def move_up(self):
