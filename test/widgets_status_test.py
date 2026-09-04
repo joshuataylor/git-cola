@@ -195,6 +195,66 @@ def test_unchanged_refresh_preserves_the_selection(widget):
     assert widget.currentItem() is parent.child(1)
 
 
+def test_content_only_refresh_recomputes_current_diff(widget):
+    """Editing an already-listed file re-diffs it even when no section rebuilds.
+
+    Regression from ee1f75f0: a file's on-disk content can change without
+    altering its (path, deleted) fingerprint, so no section rebuilds,
+    _restore_selection() is skipped, and the diff pane never updates. A no-op
+    refresh must still dispatch the diff for the current selection.
+    show_selection() runs it through runtask.run().
+    """
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified.child(0))
+    modified.child(0).setSelected(True)
+
+    widget.context.runtask.run.reset_mock()
+    widget.previous_contents = selection.State([], [], ['m1'], [])
+    widget._save_selection()
+    widget.refresh()  # identical contents -> no section rebuilt
+
+    assert widget.context.runtask.run.called
+
+
+def test_content_only_refresh_without_selection_skips_diff(widget):
+    """A no-op refresh with nothing selected does not dispatch a diff."""
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    widget.setCurrentItem(None)
+
+    widget.context.runtask.run.reset_mock()
+    widget.previous_contents = selection.State([], [], ['m1'], [])
+    widget._save_selection()
+    widget.refresh()
+
+    assert not widget.context.runtask.run.called
+
+
+def test_edit_with_other_section_change_recomputes_current_diff(widget):
+    """A change in one section re-diffs a current selection whose own section
+    was not rebuilt.
+
+    Adding an untracked file rebuilds Untracked but leaves Modified untouched;
+    reselecting the already-current Modified item emits no itemSelectionChanged,
+    so the diff must be recomputed explicitly.
+    """
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified.child(0))
+    modified.child(0).setSelected(True)
+
+    widget.context.runtask.run.reset_mock()
+    widget.previous_contents = selection.State([], [], ['m1'], [])
+    widget._save_selection()
+    widget._model.set_contents(modified=['m1'], untracked=['u1'])
+    widget.refresh()
+
+    assert widget.context.runtask.run.called
+
+
 def _selected_children(widget, idx):
     parent = widget.topLevelItem(idx)
     return [
@@ -204,8 +264,8 @@ def _selected_children(widget, idx):
     ]
 
 
-def test_select_all_scopes_to_current_category_and_focuses_header(widget):
-    """Select All picks the current item's category and focuses its header."""
+def test_select_all_selects_every_category_and_focuses_first_file(widget):
+    """Select All selects every file across all categories, current on the first."""
     widget._model.set_contents(modified=['m1', 'm2', 'm3'], untracked=['u1', 'u2'])
     widget.refresh()
 
@@ -215,12 +275,14 @@ def test_select_all_scopes_to_current_category_and_focuses_header(widget):
     widget.selectAll()
 
     assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2', 'm3']
-    assert _selected_children(widget, status.UNTRACKED_IDX) == []
-    assert widget.currentItem() is modified
+    assert _selected_children(widget, status.UNTRACKED_IDX) == ['u1', 'u2']
+    # Current item is the first file of the first non-empty category, so the
+    # native Down arrow navigates the selection instead of skipping past it.
+    assert widget.currentItem() is modified.child(0)
 
 
-def test_select_all_from_header_selects_that_category(widget):
-    """Select All while a header is current selects that whole category."""
+def test_select_all_from_header_selects_every_category(widget):
+    """Select All while a header is current still selects every category."""
     widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
     widget.refresh()
 
@@ -230,12 +292,12 @@ def test_select_all_from_header_selects_that_category(widget):
     widget.selectAll()
 
     assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2']
-    assert _selected_children(widget, status.UNTRACKED_IDX) == []
-    assert widget.currentItem() is modified
+    assert _selected_children(widget, status.UNTRACKED_IDX) == ['u1']
+    assert widget.currentItem() is modified.child(0)
 
 
-def test_select_all_with_no_current_item_uses_first_non_empty_category(widget):
-    """With nothing focused, Select All falls back to the first category."""
+def test_select_all_with_no_current_item_selects_every_category(widget):
+    """With nothing focused, Select All still selects every category."""
     widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
     widget.refresh()
     widget.setCurrentItem(None)
@@ -244,5 +306,16 @@ def test_select_all_with_no_current_item_uses_first_non_empty_category(widget):
 
     modified = widget.topLevelItem(status.MODIFIED_IDX)
     assert _selected_children(widget, status.MODIFIED_IDX) == ['m1', 'm2']
+    assert _selected_children(widget, status.UNTRACKED_IDX) == ['u1']
+    assert widget.currentItem() is modified.child(0)
+
+
+def test_select_all_with_empty_tree_is_a_safe_noop(widget):
+    """Select All on an empty tree returns without selecting anything."""
+    widget._model.set_contents()
+    widget.refresh()
+
+    widget.selectAll()
+
+    assert _selected_children(widget, status.MODIFIED_IDX) == []
     assert _selected_children(widget, status.UNTRACKED_IDX) == []
-    assert widget.currentItem() is modified
