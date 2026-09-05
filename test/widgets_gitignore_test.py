@@ -6,6 +6,7 @@ import pytest
 
 from cola.settings import Settings
 from cola.widgets import gitignore
+from cola.widgets import standard
 from qtpy import QtWidgets
 
 
@@ -54,3 +55,41 @@ def test_button_row_uses_the_shared_helper(view):
         assert view.button_box.buttonRole(view.button_close) == roles.RejectRole
     else:
         assert isinstance(view.button_box, QtWidgets.QHBoxLayout)
+
+
+def test_default_button_is_focused_on_macos(view, monkeypatch):
+    """On macOS a sheet with no focus widget gives the default button focus"""
+    monkeypatch.setattr(standard.utils, 'is_darwin', lambda: True)
+    focused = []
+    monkeypatch.setattr(
+        view.button_apply, 'setFocus', lambda *args: focused.append(True)
+    )
+    # The dialog reaches its sheet with nothing focused; the default (Add)
+    # button is the one that should receive focus so Return activates it.
+    assert view.button_apply.isDefault()
+    view._focus_default_button()
+    assert focused == [True]
+
+
+def test_default_button_focus_is_a_noop_off_macos(view, monkeypatch):
+    monkeypatch.setattr(standard.utils, 'is_darwin', lambda: False)
+    focused = []
+    monkeypatch.setattr(
+        view.button_apply, 'setFocus', lambda *args: focused.append(True)
+    )
+    view._focus_default_button()
+    assert focused == []
+
+
+def test_return_in_pattern_field_submits(view, qapp, monkeypatch):
+    """Return in the focused pattern field triggers apply() (macOS sheet path)"""
+    do = MagicMock()
+    monkeypatch.setattr(gitignore.cmds, 'do', do)
+    monkeypatch.setattr(view, 'accept', MagicMock())
+    view.radio_pattern.setChecked(True)
+    # connect_toggle() uses a queued connection.
+    qapp.processEvents()
+    view.edit_filename.setText('build/')
+    view.edit_filename.returnPressed.emit()
+    assert do.call_count == 1
+    view.accept.assert_called_once()

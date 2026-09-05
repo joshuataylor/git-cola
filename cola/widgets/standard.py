@@ -631,6 +631,32 @@ class Dialog(WidgetMixin, QtWidgets.QDialog):
         self.dispose()
         self.Base.closeEvent(self, event)
 
+    def showEvent(self, event):
+        self.Base.showEvent(self, event)
+        self._focus_default_button()
+
+    def _focus_default_button(self):
+        """Focus the default button on macOS when nothing else holds focus.
+
+        A parented WindowModal dialog is a native sheet on macOS. When no
+        widget is focused -- e.g. every button is Qt.NoFocus and the only
+        inputs are radios or disabled fields that macOS keeps out of the
+        keyboard focus chain.
+
+        Annoyingly, this means that pressing Return/Enter does nothing.
+
+        Focusing the default button (as MessageBox already does) lets QPushButton handle Return
+        directly.
+
+        QWidget.setFocus() ignores focusPolicy, so it works on a NoFocus button.
+        """
+        if not utils.is_darwin() or self.focusWidget() is not None:
+            return
+        for button in self.findChildren(QtWidgets.QPushButton):
+            if button.isDefault() and button.isVisibleTo(self) and button.isEnabled():
+                button.setFocus()
+                break
+
 
 class MainWindow(MainWindowMixin, QtWidgets.QMainWindow):
     Base = QtWidgets.QMainWindow
