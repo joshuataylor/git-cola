@@ -87,6 +87,10 @@ class AddToGitIgnore(Dialog):
         qtutils.connect_toggle(self.radio_filename, self.check_filename)
         qtutils.connect_button(self.button_apply, self.apply)
         qtutils.connect_button(self.button_close, self.close)
+        # Return in the pattern field submits. On a macOS sheet the key event
+        # does not propagate from the focused line edit to the dialog's default
+        # button, so wire the field's own signal directly to apply().
+        self.edit_filename.returnPressed.connect(self.apply)
 
         self.init_state(None, self.resize_widget, parent)
 
