@@ -113,6 +113,11 @@ class CreateTag(standard.Dialog):
 
         qtutils.connect_button(self.close_button, self.close)
         qtutils.connect_button(self.create_button, self.create_tag)
+        # Return in a text field submits (macOS sheets do not propagate it to
+        # the default button). The multi-line message field keeps Return for
+        # newlines; the completion revision edit emits "enter" on Return.
+        self.tag_name.returnPressed.connect(self.create_button.click)
+        self.revision.enter.connect(self.create_button.click)
 
         settings = context.settings
         self.init_state(settings, self.resize, defs.scale(720), defs.scale(210))

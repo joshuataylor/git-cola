@@ -175,6 +175,10 @@ class Archive(Dialog):
         qtutils.connect_button(self.browse, self.choose_filename)
         qtutils.connect_button(self.close_button, self.reject)
         qtutils.connect_button(self.save_button, self.save_archive)
+        # Return in a text field submits (macOS sheets do not propagate it to
+        # the default button); click() is a no-op while Save is disabled.
+        self.filetext.returnPressed.connect(self.save_button.click)
+        self.prefix_text.returnPressed.connect(self.save_button.click)
 
         self.init_size(parent=parent)
 

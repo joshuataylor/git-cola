@@ -151,6 +151,9 @@ class Clone(standard.Dialog):
         qtutils.connect_button(self.close_button, self.close)
         qtutils.connect_button(self.ok_button, self.prepare_to_clone)
         self.url.textChanged.connect(lambda x: self.update_actions())
+        # Return in the URL field submits (macOS sheets do not propagate it to
+        # the default button); click() is a no-op while Clone is disabled.
+        self.url.returnPressed.connect(self.ok_button.click)
 
         self.init_state(context.settings, self.resize, 720, 200)
         self.update_actions()

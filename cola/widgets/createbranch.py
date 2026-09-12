@@ -203,6 +203,11 @@ class CreateBranchDialog(standard.Dialog):
         qtutils.add_close_action(self)
         qtutils.connect_button(self.close_button, self.close)
         qtutils.connect_button(self.create_button, self.create_branch)
+        # Return in a text field submits (macOS sheets do not propagate it to
+        # the default button). Completion line edits emit "enter" on Return
+        # with the popup closed.
+        self.branch_name.enter.connect(self.create_button.click)
+        self.revision.enter.connect(self.create_button.click)
         qtutils.connect_toggle(self.local_radio, self.display_model)
         qtutils.connect_toggle(self.remote_radio, self.display_model)
         qtutils.connect_toggle(self.tag_radio, self.display_model)
