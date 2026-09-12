@@ -480,6 +480,9 @@ def prompt_n(msg: str, inputs: Any) -> tuple[bool, list[Any]]:
         lineedit.textChanged.connect(
             lambda x: ok_b.setEnabled(all(get_values())), type=Qt.QueuedConnection
         )
+        # Return submits (macOS sheets do not propagate it to the default
+        # button); click() is a no-op while the OK button is disabled.
+        lineedit.returnPressed.connect(ok_b.click)
         if value:
             lineedit.setText(value)
         form_widgets.append((name, lineedit))
