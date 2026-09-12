@@ -8,6 +8,7 @@ from cola import core
 from cola import git
 from cola import gitcfg
 from cola import gitcmds
+from cola import operations_local
 from cola.models import main as main_model
 from cola.settings import Settings
 from cola.widgets import main as main_widget
@@ -45,7 +46,8 @@ def main_view(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, 'config_path', str(tmp_path / 'settings'))
 
     context = MagicMock()
-    context.git = git.create()
+    context.ops = operations_local.LocalOperations()
+    context.git = git.create(context.ops)
     context.git.set_worktree(core.getcwd())
     context.cfg = gitcfg.create(context)
     context.model = main_model.create(context)
