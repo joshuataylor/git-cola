@@ -29,10 +29,10 @@ def test_xdg_cache_home_falls_back_per_platform(monkeypatch):
     monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
     monkeypatch.setattr('cola.core.expanduser', lambda _path: '/home/user')
 
-    monkeypatch.setattr('cola.utils.is_darwin', lambda: True)
+    monkeypatch.setattr('cola.core.IS_DARWIN', True)
     assert resources.xdg_cache_home() == os.path.join('/home/user', 'Library', 'Caches')
 
-    monkeypatch.setattr('cola.utils.is_darwin', lambda: False)
+    monkeypatch.setattr('cola.core.IS_DARWIN', False)
     assert resources.xdg_cache_home() == os.path.join('/home/user', '.cache')
 
 
