@@ -209,7 +209,7 @@ def _shell_argv(command: str) -> list[str]:
     'gh auth token'
 
     """
-    if utils.is_win32():
+    if core.IS_WIN32:
         return ['cmd', '/c', command]
     return ['/bin/sh', '-c', command]
 
