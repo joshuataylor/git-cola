@@ -413,7 +413,7 @@ class AddRemoteDialog(QtWidgets.QDialog):
         self.context = context
         self.widget = RemoteWidget(context, self, readonly_url=readonly_url)
         self.add_button = qtutils.create_button(
-            text=N_('Add Remote'), icon=icons.ok(), enabled=False
+            text=N_('Add Remote'), icon=icons.ok(), enabled=False, default=True
         )
         self.close_button = qtutils.close_button()
 
@@ -431,6 +431,10 @@ class AddRemoteDialog(QtWidgets.QDialog):
         self.widget.valid.connect(self.add_button.setEnabled)
         qtutils.connect_button(self.add_button, self.accept)
         qtutils.connect_button(self.close_button, self.reject)
+        # Return in a text field submits (macOS sheets do not propagate it to
+        # the default button); click() is a no-op while Add Remote is disabled.
+        self.widget.remote_name.returnPressed.connect(self.add_button.click)
+        self.widget.remote_url.returnPressed.connect(self.add_button.click)
 
     def set_name(self, value):
         self.widget.name = value

@@ -917,6 +917,9 @@ class PreferencesView(standard.Dialog):
         self.stack_widget.addWidget(self.appearance_scroll_area)
 
         self.close_button = qtutils.close_button()
+        # Make Close the default so Return closes the dialog; the base Dialog
+        # focuses it on macOS, where a sheet otherwise drops Return.
+        self.close_button.setDefault(True)
 
         self.button_layout = qtutils.button_box(None, self.close_button)
         # If the user already has the user.email and user.name configured then default
