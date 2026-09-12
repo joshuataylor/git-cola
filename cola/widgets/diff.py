@@ -2806,7 +2806,9 @@ class ApplyPatches(standard.Dialog):
             tooltip=N_('Remove selected (Delete)'),
         )
 
-        self.apply_button = qtutils.create_button(text=N_('Apply'), icon=icons.ok())
+        self.apply_button = qtutils.create_button(
+            text=N_('Apply'), icon=icons.ok(), default=True
+        )
 
         self.close_button = qtutils.close_button()
 
