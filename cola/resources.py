@@ -7,7 +7,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from . import core
-from . import utils
 
 if TYPE_CHECKING:
     from .types import TextType
@@ -183,7 +182,7 @@ def xdg_cache_home(*args) -> str:
     macOS uses its native ~/Library/Caches and everything else uses ~/.cache.
     """
     home = core.expanduser('~')
-    if utils.is_darwin():
+    if core.IS_DARWIN:
         default = os.path.join(home, 'Library', 'Caches')
     else:
         default = os.path.join(home, '.cache')
