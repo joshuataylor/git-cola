@@ -115,6 +115,9 @@ class AboutView(QtWidgets.QDialog):
         self.setLayout(self.main_layout)
 
         qtutils.connect_button(self.close_button, self.accept)
+        # Raw QDialog, so the base Dialog focus fix does not run; bind Return to
+        # close via the shortcut path so it works on a macOS sheet.
+        qtutils.add_action(self, N_('Close'), self.accept, *hotkeys.ACCEPT)
 
         self.resize(defs.scale(600), defs.scale(720))
 
