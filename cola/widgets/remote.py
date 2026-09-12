@@ -434,6 +434,11 @@ class RemoteActionDialog(standard.Dialog):
 
         connect_button(self.action_button, self.action_callback)
         connect_button(self.close_button, self.close)
+        # Return in a branch field submits (macOS sheets do not propagate it to
+        # the default button); click() is a no-op while the action is disabled.
+        # The remote_name field keeps its editingFinished behaviour.
+        self.local_branch.returnPressed.connect(self.action_button.click)
+        self.remote_branch.returnPressed.connect(self.action_button.click)
 
         qtutils.add_action(
             self, N_('Close'), self.close, QtGui.QKeySequence.Close, 'Esc'
