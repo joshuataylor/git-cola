@@ -1230,7 +1230,10 @@ class MainView(standard.MainWindow):
             self.commiteditor.set_linebreak(value)
 
         elif config == prefs.SORT_BOOKMARKS:
-            self.bookmarksdock.widget().reload_bookmarks()
+            # The Favorites widget is built lazily and reads the sort order
+            # when it is built, so there is nothing to reload until then.
+            if self.bookmarkswidget is not None:
+                self.bookmarkswidget.reload_bookmarks()
 
         elif config == prefs.TEXTWIDTH:
             # Use the effective value for the same reason as tabwidth.
