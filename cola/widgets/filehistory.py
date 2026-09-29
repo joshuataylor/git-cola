@@ -185,7 +185,8 @@ class FileHistoryWindow(standard.Widget):
 
     def view_dag(self):
         """Open the DAG scoped to this file"""
-        from . import dag as dag_widget  # lazy import; avoids a circular import
+        # Lazy import; avoids a circular import.
+        from . import dag as dag_widget
 
         context = self.context
         existing = getattr(context.view, 'dag', None)
