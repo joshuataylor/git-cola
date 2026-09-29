@@ -10,6 +10,7 @@ from cola import gitcfg
 from cola import gitcmds
 from cola import operations_local
 from cola.models import main as main_model
+from cola.models import prefs
 from cola.settings import Settings
 from cola.widgets import main as main_widget
 from qtpy import QtWidgets
@@ -114,3 +115,20 @@ def test_both_bookmarks_docks_build_when_revealed(main_view):
     copy_widgets = main_view.edit_proxy.overrides['copy']
     assert main_view.bookmarkswidget.tree in copy_widgets
     assert main_view.recentwidget.tree in copy_widgets
+
+
+def test_sort_bookmarks_config_before_favorites_built(main_view):
+    """Changing the bookmark sort order must not require the Favorites widget"""
+    main_view._config_updated(None, prefs.SORT_BOOKMARKS, True)
+    assert main_view.bookmarkswidget is None
+
+
+def test_sort_bookmarks_config_reloads_built_favorites(main_view, monkeypatch):
+    """A built Favorites widget reloads when the bookmark sort order changes"""
+    main_view.bookmarksdock.visibilityChanged.emit(True)
+    reload_bookmarks = MagicMock()
+    monkeypatch.setattr(main_view.bookmarkswidget, 'reload_bookmarks', reload_bookmarks)
+
+    main_view._config_updated(None, prefs.SORT_BOOKMARKS, True)
+
+    reload_bookmarks.assert_called_once_with()
