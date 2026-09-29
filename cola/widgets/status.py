@@ -1449,7 +1449,8 @@ def view_history(context):
 
 def view_dag_history(context):
     """Open the built-in git-dag scoped to the selected paths."""
-    from . import dag as dag_widget  # lazy import; dag widget pulls in many widgets
+    # Lazy import; the dag widget pulls in many widgets.
+    from . import dag as dag_widget
 
     paths = context.selection.union()
     existing = getattr(context.view, 'dag', None)
