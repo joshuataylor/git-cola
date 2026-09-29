@@ -542,7 +542,8 @@ class RepoTreeView(standard.TreeView):
 
     def view_dag_history(self):
         """Open the built-in git-dag scoped to the selected paths."""
-        from . import dag as dag_widget  # lazy import; avoids a circular import
+        # Lazy import; avoids a circular import.
+        from . import dag as dag_widget
 
         context = self.context
         paths = self.selected_paths()
