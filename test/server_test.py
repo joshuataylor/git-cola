@@ -2,9 +2,29 @@ import multiprocessing
 import os
 import time
 
+import pytest
+
 from cola import operations_local
 from cola import operations_remote
 from cola import server
+
+
+@pytest.fixture(autouse=True)
+def clean_key_test_env():
+    """Keep 'key_test' out of this process's environment between tests
+
+    putenv() and unsetenv() change the C-level environment without updating
+    os.environ, and the server is started with the "spawn" method, so a value
+    leaked by one test is inherited into the next test's server os.environ.
+    """
+    _unset_key_test()
+    yield
+    _unset_key_test()
+
+
+def _unset_key_test():
+    os.environ.pop('key_test', None)
+    os.unsetenv('key_test')
 
 
 class create_test_server:
