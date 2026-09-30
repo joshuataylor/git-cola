@@ -262,6 +262,82 @@ class BaseTextEditExtension(QtCore.QObject):
         return
 
 
+class MouseSelectionGuard:
+    """Clear stale double/triple-click state in Qt's text widgets
+
+    QWidgetTextControl keeps some mouse state between clicks that it does not
+    reset when a later click clears the selection:
+
+    - A double-click arms a triple-click for doubleClickInterval(). Any press
+      near the double-click point in that window selects the whole line, even
+      when other clicks happened in between.
+    - The word/line granularity used to extend a double/triple-click drag is
+      only cleared by a plain press that moves the cursor. Clicking inside a
+      selection to clear it does not, and neither does a double-click, so a
+      later double-click drag extends by whole lines.
+
+    That state is private. The only way to clear it is a plain left press
+    through the base mousePressEvent() with no selection under the pointer,
+    so one is synthesised where the stale state would otherwise be used.
+    """
+
+    def __init__(self, widget, base_press_event):
+        self._widget = widget
+        self._base_press_event = base_press_event
+        self._pos = None
+        self._presses = 0
+        self._elapsed = QtCore.QElapsedTimer()
+
+    def double_click(self, event):
+        """Reset Qt's state before a double-click and remember where it was"""
+        if event.button() != Qt.LeftButton:
+            return
+        self._reset(event)
+        self._pos = event.pos()
+        self._presses = 0
+        self._elapsed.start()
+
+    def press(self, event):
+        """Stop a press after an intervening click being taken as a triple-click"""
+        if event.button() != Qt.LeftButton or self._pos is None:
+            return
+        self._presses += 1
+        if self._elapsed.elapsed() >= QtWidgets.QApplication.doubleClickInterval():
+            self._pos = None
+            return
+        # The first press after a double-click is a genuine triple-click.
+        if self._presses < 2:
+            return
+        distance = (event.pos() - self._pos).manhattanLength()
+        if distance < QtWidgets.QApplication.startDragDistance():
+            self._reset(event)
+
+    def _reset(self, event):
+        """Send a plain press through Qt to clear its double/triple-click state"""
+        if hasattr(event, 'position'):  # Qt6
+            position = event.position()
+        else:
+            position = event.pos()
+        widget = self._widget
+        with qtutils.BlockSignals(widget):
+            # Qt consumes the first press as a triple-click when one is pending,
+            # which selects the line, so a second press is needed in that case.
+            for _ in range(2):
+                cursor = widget.textCursor()
+                cursor.clearSelection()
+                widget.setTextCursor(cursor)
+                press = QtGui.QMouseEvent(
+                    QtCore.QEvent.MouseButtonPress,
+                    position,
+                    Qt.LeftButton,
+                    Qt.LeftButton,
+                    Qt.NoModifier,
+                )
+                self._base_press_event(press)
+                if not widget.textCursor().hasSelection():
+                    break
+
+
 class PlainTextEditExtension(BaseTextEditExtension):
     def set_linebreak(self, brk):
         if brk:
@@ -298,6 +374,7 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
         self.word_wrap_mode = word_wrap_mode
         self.ext = PlainTextEditExtension(self, readonly)
         self.cursor_position = self.ext.cursor_position
+        self._mouse_selection = MouseSelectionGuard(self, super().mousePressEvent)
 
     def get(self):
         """Return the raw Unicode value from Qt"""
@@ -367,7 +444,12 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
 
     def mousePressEvent(self, event):
         self.ext.mouse_press_event(event)
+        self._mouse_selection.press(event)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self._mouse_selection.double_click(event)
+        super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
         """Disable control+wheelscroll text resizing"""
@@ -540,6 +622,7 @@ class TextEdit(QtWidgets.QTextEdit):
         self.menu_actions = []
         self.ext = TextEditExtension(self, readonly)
         self.cursor_position = self.ext.cursor_position
+        self._mouse_selection = MouseSelectionGuard(self, super().mousePressEvent)
 
     def get(self):
         """Return the raw Unicode value from Qt"""
@@ -579,7 +662,12 @@ class TextEdit(QtWidgets.QTextEdit):
 
     def mousePressEvent(self, event):
         self.ext.mouse_press_event(event)
+        self._mouse_selection.press(event)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self._mouse_selection.double_click(event)
+        super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
         """Disable control+wheelscroll text resizing"""
