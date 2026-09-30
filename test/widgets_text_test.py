@@ -224,3 +224,59 @@ def test_line_edit_press_after_intervening_click_is_not_a_triple_click(line_edit
     _click(widget, start)
     assert widget.selectedText() == ''
     assert widget.cursorPosition() == 10
+
+
+LABEL_TEXT = 'diff: keep the stale selection state from leaking'
+
+
+@pytest.fixture
+def label(qapp):
+    instance = text.PlainTextLabel()
+    instance.set_text(LABEL_TEXT)
+    instance.resize(600, 30)
+    instance.show()
+    QTest.qWaitForWindowExposed(instance)
+    try:
+        yield instance
+    finally:
+        instance.close()
+
+
+def _label_point(widget, column):
+    """Return the position of a column in a left-aligned single-line label"""
+    metrics = QtGui.QFontMetrics(widget.font())
+    rect = widget.contentsRect()
+    advance = metrics.horizontalAdvance(LABEL_TEXT[:column])
+    return QPoint(rect.left() + advance + 2, rect.center().y())
+
+
+def test_label_triple_click_selects_all(label):
+    _triple_click(label, _label_point(label, 12))
+    assert label.selectedText() == LABEL_TEXT
+
+
+def test_label_press_after_intervening_click_is_not_a_triple_click(label):
+    """A click between the double-click and the next press cancels the triple-click"""
+    start = _label_point(label, 16)
+    _double_click(label, start)
+    assert label.selectedText() == 'stale'
+    _click(label, _label_point(label, 40))
+    assert label.selectedText() == ''
+    _send(label, PRESS, start)
+    _send(label, MOVE, _label_point(label, 24))
+    _send(label, RELEASE, _label_point(label, 24))
+    assert label.selectedText() == 'tale sel'
+
+
+def test_label_double_click_after_deselected_triple_click_extends_by_word(label):
+    """Clearing a triple-click by clicking must not leave line-wise dragging"""
+    _triple_click(label, _label_point(label, 12))
+    assert label.selectedText() == LABEL_TEXT
+    QTest.qWait(QtWidgets.QApplication.doubleClickInterval() + 100)
+    start = _label_point(label, 6)
+    _click(label, _label_point(label, 30))
+    assert label.selectedText() == ''
+    _send(label, DOUBLE_CLICK, start)
+    _send(label, MOVE, _label_point(label, 19))
+    _send(label, RELEASE, _label_point(label, 19))
+    assert label.selectedText() == 'keep the stale'
