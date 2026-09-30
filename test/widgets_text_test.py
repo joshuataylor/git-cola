@@ -76,8 +76,11 @@ def _point(widget, column, line=1):
 
 
 def _send(widget, event_type, pos):
-    """Send a left-button mouse event to the widget's viewport"""
-    viewport = widget.viewport()
+    """Send a left-button mouse event to the widget (or its viewport)"""
+    if hasattr(widget, 'viewport'):
+        viewport = widget.viewport()
+    else:
+        viewport = widget
     if event_type == MOVE:
         button = Qt.NoButton
     else:
@@ -171,3 +174,53 @@ def test_double_click_after_deselected_triple_click_extends_by_word(widget):
     _send(widget, MOVE, _point(widget, 34))
     _send(widget, RELEASE, _point(widget, 34))
     assert _selected(widget) == 'alpha, beta, '
+
+
+LINE_EDIT_TEXT = 'feature/stale-selection-state fix'
+
+
+@pytest.fixture
+def line_edit(qapp):
+    instance = text.LineEdit()
+    instance.setText(LINE_EDIT_TEXT)
+    instance.resize(400, 30)
+    instance.show()
+    QTest.qWaitForWindowExposed(instance)
+    try:
+        yield instance
+    finally:
+        instance.close()
+
+
+def _line_edit_point(widget, column):
+    """Return the position of a column in a line edit"""
+    widget.setCursorPosition(column)
+    return widget.cursorRect().center()
+
+
+def test_line_edit_triple_click_selects_all(line_edit):
+    widget = line_edit
+    _triple_click(widget, _line_edit_point(widget, 10))
+    assert widget.selectedText() == LINE_EDIT_TEXT
+
+
+def test_line_edit_press_after_intervening_click_is_not_a_triple_click(line_edit):
+    """A click between the double-click and the next press cancels the triple-click"""
+    widget = line_edit
+    start = _line_edit_point(widget, 10)
+    elsewhere = _line_edit_point(widget, 28)
+    end = _line_edit_point(widget, 18)
+    widget.deselect()
+    _double_click(widget, start)
+    assert widget.selectedText() == 'stale'
+    _click(widget, elsewhere)
+    assert widget.selectedText() == ''
+    # Press back where the double-click was and drag.
+    _send(widget, PRESS, start)
+    _send(widget, MOVE, end)
+    _send(widget, RELEASE, end)
+    assert widget.selectedText() == 'ale-sele'
+    # A further click still inside the interval places the cursor.
+    _click(widget, start)
+    assert widget.selectedText() == ''
+    assert widget.cursorPosition() == 10
