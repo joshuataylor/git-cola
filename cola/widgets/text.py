@@ -329,10 +329,11 @@ class MouseSelectionGuard:
     - A double-click arms a triple-click for doubleClickInterval(). Any press
       near the double-click point in that window selects the whole line, even
       when other clicks happened in between (see DoubleClickTracker).
-    - The word/line granularity used to extend a double/triple-click drag is
-      only cleared by a plain press that moves the cursor. Clicking inside a
-      selection to clear it does not, and neither does a double-click, so a
-      later double-click drag extends by whole lines.
+    - The word/line granularity used to extend a double/triple-click drag or
+      Shift+click is only cleared by a plain press that moves the cursor.
+      Clicking inside a selection to clear it does not, and neither do a
+      double-click, the keyboard or setTextCursor(), so a later double-click
+      drag or Shift+click extends by whole lines from the old selection.
 
     That state is private. The only way to clear it is a plain left press
     through the base mousePressEvent() with no selection under the pointer,
@@ -343,25 +344,47 @@ class MouseSelectionGuard:
         self._widget = widget
         self._base_press_event = base_press_event
         self._double_clicks = DoubleClickTracker()
+        # The selection left by the last mouse gesture. Qt's granularity only
+        # applies while the selection is still the one that gesture made.
+        self._gesture_selection = None
+        self._release_position = None
 
     def double_click(self, event):
         """Reset Qt's state before a double-click and remember where it was"""
         if event.button() != Qt.LeftButton:
             return
-        self._reset(event)
+        self._reset(_event_position(event))
         self._double_clicks.double_click(event)
 
     def press(self, event):
-        """Stop a press after an intervening click being taken as a triple-click"""
+        """Clear stale state that Qt would otherwise act on for this press"""
         if self._double_clicks.is_stale_triple_click(event):
-            self._reset(event)
+            self._reset(_event_position(event))
+        elif (
+            event.button() == Qt.LeftButton
+            and event.modifiers() & Qt.ShiftModifier
+            and self._selection() != self._gesture_selection
+        ):
+            self._extend_from_current_selection(event)
 
-    def _reset(self, event):
+    def release(self, event):
+        """Remember the selection that a mouse gesture produced"""
+        if event.button() != Qt.LeftButton:
+            return
+        self._release_position = _event_position(event)
+        if self._has_selection():
+            self._gesture_selection = self._selection()
+
+    def _extend_from_current_selection(self, event):
+        """Clear Qt's granularity so Shift+click extends the current selection"""
+        widget = self._widget
+        cursor = widget.textCursor()
+        self._reset(_event_position(event))
+        with qtutils.BlockSignals(widget):
+            widget.setTextCursor(cursor)
+
+    def _reset(self, position):
         """Send a plain press through Qt to clear its double/triple-click state"""
-        if hasattr(event, 'position'):  # Qt6
-            position = event.position()
-        else:
-            position = event.pos()
         widget = self._widget
         with qtutils.BlockSignals(widget):
             # Qt consumes the first press as a triple-click when one is pending,
@@ -387,19 +410,46 @@ class MouseSelectionGuard:
     def _has_selection(self):
         return self._widget.textCursor().hasSelection()
 
+    def _selection(self):
+        cursor = self._widget.textCursor()
+        return (cursor.anchor(), cursor.position())
+
 
 class LabelMouseSelectionGuard(MouseSelectionGuard):
     """MouseSelectionGuard for selectable QLabels
 
     QLabel drives the same QWidgetTextControl but only exposes its selection
-    through setSelection() and hasSelectedText().
+    through setSelection(), selectionStart() and selectedText().
     """
+
+    def _extend_from_current_selection(self, event):
+        widget = self._widget
+        if widget.hasSelectedText():
+            start, length = self._selection()
+            self._reset(_event_position(event))
+            with qtutils.BlockSignals(widget):
+                widget.setSelection(start, length)
+        elif self._release_position is not None:
+            # There is no cursor API, but a click leaves the cursor where the
+            # button was released, so a plain press there puts it back.
+            self._reset(self._release_position)
 
     def _clear_selection(self):
         self._widget.setSelection(0, 0)
 
     def _has_selection(self):
         return self._widget.hasSelectedText()
+
+    def _selection(self):
+        widget = self._widget
+        return (widget.selectionStart(), len(widget.selectedText()))
+
+
+def _event_position(event):
+    """Return the local position of a mouse event"""
+    if hasattr(event, 'position'):  # Qt6
+        return event.position()
+    return event.pos()
 
 
 class PlainTextEditExtension(BaseTextEditExtension):
@@ -514,6 +564,10 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
     def mouseDoubleClickEvent(self, event):
         self._mouse_selection.double_click(event)
         super().mouseDoubleClickEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        self._mouse_selection.release(event)
 
     def wheelEvent(self, event):
         """Disable control+wheelscroll text resizing"""
@@ -732,6 +786,10 @@ class TextEdit(QtWidgets.QTextEdit):
     def mouseDoubleClickEvent(self, event):
         self._mouse_selection.double_click(event)
         super().mouseDoubleClickEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        self._mouse_selection.release(event)
 
     def wheelEvent(self, event):
         """Disable control+wheelscroll text resizing"""
@@ -1472,7 +1530,9 @@ class TextLabel(QtWidgets.QLabel):
             and not self._saved_selection
         ):
             self.copy_all_callback()
-        return super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(event)
+        if self.textInteractionFlags() & Qt.TextSelectableByMouse:
+            self._mouse_selection.release(event)
 
 
 class PlainTextLabel(TextLabel):
