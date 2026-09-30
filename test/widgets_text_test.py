@@ -75,7 +75,7 @@ def _point(widget, column, line=1):
     return QPoint(rect.left() + 1, rect.center().y())
 
 
-def _send(widget, event_type, pos):
+def _send(widget, event_type, pos, modifiers=Qt.NoModifier):
     """Send a left-button mouse event to the widget (or its viewport)"""
     if hasattr(widget, 'viewport'):
         viewport = widget.viewport()
@@ -95,14 +95,14 @@ def _send(widget, event_type, pos):
         QPointF(viewport.mapToGlobal(pos)),
         button,
         buttons,
-        Qt.NoModifier,
+        modifiers,
     )
     QtWidgets.QApplication.sendEvent(viewport, event)
 
 
-def _click(widget, pos):
-    _send(widget, PRESS, pos)
-    _send(widget, RELEASE, pos)
+def _click(widget, pos, modifiers=Qt.NoModifier):
+    _send(widget, PRESS, pos, modifiers)
+    _send(widget, RELEASE, pos, modifiers)
 
 
 def _double_click(widget, pos):
@@ -174,6 +174,42 @@ def test_double_click_after_deselected_triple_click_extends_by_word(widget):
     _send(widget, MOVE, _point(widget, 34))
     _send(widget, RELEASE, _point(widget, 34))
     assert _selected(widget) == 'alpha, beta, '
+
+
+def _wait_out_double_click():
+    QTest.qWait(QtWidgets.QApplication.doubleClickInterval() + 100)
+
+
+def test_shift_click_after_deselected_triple_click_extends_from_cursor(widget):
+    """Clearing a line selection by clicking must not leave line-wise Shift+click"""
+    _triple_click(widget, _point(widget, 10))
+    _wait_out_double_click()
+    # Click inside the selected line, which clears the selection.
+    _click(widget, _point(widget, 30))
+    assert _selected(widget) == ''
+    _wait_out_double_click()
+    _click(widget, _point(widget, 3, line=0), Qt.ShiftModifier)
+    assert _selected(widget) == 'st line here' + PARAGRAPH_SEPARATOR + LINE[:30]
+
+
+def test_shift_click_after_moved_cursor_extends_from_cursor(widget):
+    """Shift+click extends from where setTextCursor() put the cursor"""
+    _triple_click(widget, _point(widget, 10))
+    _wait_out_double_click()
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    widget.setTextCursor(cursor)
+    _click(widget, _point(widget, 8, line=2), Qt.ShiftModifier)
+    expect = TEXT[2 : TEXT.index('third line') + 8].replace('\n', PARAGRAPH_SEPARATOR)
+    assert _selected(widget) == expect
+
+
+def test_shift_click_after_double_click_extends_by_word(widget):
+    """Shift+click straight after a double-click keeps Qt's word-wise extension"""
+    _double_click(widget, _point(widget, 8))
+    _wait_out_double_click()
+    _click(widget, _point(widget, 23), Qt.ShiftModifier)
+    assert _selected(widget) == 'some_function(alpha'
 
 
 LINE_EDIT_TEXT = 'feature/stale-selection-state fix'
@@ -280,3 +316,15 @@ def test_label_double_click_after_deselected_triple_click_extends_by_word(label)
     _send(label, MOVE, _label_point(label, 19))
     _send(label, RELEASE, _label_point(label, 19))
     assert label.selectedText() == 'keep the stale'
+
+
+def test_label_shift_click_after_deselected_word_extends_from_cursor(label):
+    """Clearing a word selection by clicking must not leave word-wise Shift+click"""
+    _double_click(label, _label_point(label, 16))
+    assert label.selectedText() == 'stale'
+    _wait_out_double_click()
+    _click(label, _label_point(label, 17))
+    assert label.selectedText() == ''
+    _wait_out_double_click()
+    _click(label, _label_point(label, 40), Qt.ShiftModifier)
+    assert label.selectedText() == LABEL_TEXT[17:40]
