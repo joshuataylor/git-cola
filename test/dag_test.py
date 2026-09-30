@@ -894,6 +894,31 @@ def test_git_dag_without_branch_omits_ref(git_dag_cls, app_context):
     assert params.paths() == ['A']
 
 
+@patch('cola.widgets.dag.GitDAG')
+def test_git_dag_forwards_prefs_model(git_dag_cls, app_context):
+    """git_dag() hands the caller's PreferencesModel to the DAG window"""
+    from cola.widgets import dag as dag_widget
+
+    prefs_model = MagicMock()
+    dag_widget.git_dag(app_context, show=False, prefs_model=prefs_model)
+
+    assert git_dag_cls.call_args[1]['prefs_model'] is prefs_model
+
+
+def test_preferences_action_has_macos_role_and_shortcut(qapp):
+    """The DAG's Preferences action lands in the macOS app menu with Cmd+,"""
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    win.context = MagicMock()
+    win.prefs_model = MagicMock()
+    try:
+        action = win._create_preferences_action()
+        assert action.menuRole() == QtWidgets.QAction.PreferencesRole
+        assert action.shortcut() == QtGui.QKeySequence(QtGui.QKeySequence.Preferences)
+    finally:
+        win.deleteLater()
+
+
 def _make_scoped_dag(app_context):
     """A minimal GitDAG wired for the re-scope/navigate_back logic."""
     win = _make_dag_with_lists(app_context)
