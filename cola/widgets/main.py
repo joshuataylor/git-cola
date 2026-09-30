@@ -1406,7 +1406,9 @@ class MainView(standard.MainWindow):
         )
 
     def git_dag(self):
-        self.dag = dag.git_dag(self.context, existing_view=self.dag)
+        self.dag = dag.git_dag(
+            self.context, existing_view=self.dag, prefs_model=self.prefs_model
+        )
 
     def _lazy_dock(self, dock, builder):
         """Build a hidden dock's widget the first time the dock is revealed"""

@@ -46,11 +46,18 @@ from . import diff
 from . import diff_intraline
 from . import filelist
 from . import finder
+from . import prefs as prefs_widget
 from . import standard
 
 
-def git_dag(context, args=None, existing_view=None, show=True, paths=None):
-    """Return a pre-populated git DAG widget."""
+def git_dag(
+    context, args=None, existing_view=None, show=True, paths=None, prefs_model=None
+):
+    """Return a pre-populated git DAG widget.
+
+    prefs_model is shared with the Preferences dialog opened from the DAG; the
+    main window passes its own so config changes made there reach it too.
+    """
     model = context.model
     branch = model.currentbranch
     if paths:
@@ -64,7 +71,7 @@ def git_dag(context, args=None, existing_view=None, show=True, paths=None):
     params.set_arguments(args)
 
     if existing_view is None:
-        view = GitDAG(context, params)
+        view = GitDAG(context, params, prefs_model=prefs_model)
     else:
         view = existing_view
         view.set_params(params)
@@ -1978,7 +1985,7 @@ class GitDAG(standard.MainWindow):
 
     commits_selected = Signal(object)
 
-    def __init__(self, context, params, parent=None):
+    def __init__(self, context, params, parent=None, prefs_model=None):
         super().__init__(parent)
 
         self.setMinimumSize(420, 420)
@@ -1988,6 +1995,9 @@ class GitDAG(standard.MainWindow):
         self.context = context
         self.params = params
         self.model = context.model
+        if prefs_model is None:
+            prefs_model = prefs.PreferencesModel(context)
+        self.prefs_model = prefs_model
 
         self.commits = {}
         self.commit_list = []
@@ -2237,6 +2247,7 @@ class GitDAG(standard.MainWindow):
         self.refresh_action = qtutils.add_action(
             self, N_('Refresh'), self.refresh, hotkeys.REFRESH
         )
+        self.preferences_action = self._create_preferences_action()
 
         # Create the application menu
         self.menubar = QtWidgets.QMenuBar(self)
@@ -2254,6 +2265,9 @@ class GitDAG(standard.MainWindow):
         self.view_menu.addAction(self.file_dock.toggleViewAction())
         self.view_menu.addSeparator()
         self.view_menu.addAction(self.lock_layout_action)
+        # On macOS the PreferencesRole moves this into the application menu.
+        self.view_menu.addSeparator()
+        self.view_menu.addAction(self.preferences_action)
 
         left = Qt.LeftDockWidgetArea
         right = Qt.RightDockWidgetArea
@@ -2487,6 +2501,26 @@ class GitDAG(standard.MainWindow):
         # the expensive display() pass is debounced.
         self._display_timer.start()
         self.update_window_title()
+
+    def _create_preferences_action(self):
+        """Create the Preferences action so a standalone DAG can reach it"""
+        action = qtutils.add_action_with_icon(
+            self,
+            icons.configure(),
+            N_('Preferences'),
+            partial(
+                prefs_widget.preferences,
+                self.context,
+                parent=self,
+                model=self.prefs_model,
+            ),
+            QtGui.QKeySequence.Preferences,
+        )
+        # Tell Qt's Cocoa plugin this belongs in the macOS application menu.
+        # Without an explicit role Qt matches the English label text, which
+        # fails once the label is translated.
+        action.setMenuRole(QtWidgets.QAction.PreferencesRole)
+        return action
 
     def refresh(self):
         """Unconditionally refresh the DAG"""
