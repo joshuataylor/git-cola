@@ -367,9 +367,7 @@ class MouseSelectionGuard:
             # Qt consumes the first press as a triple-click when one is pending,
             # which selects the line, so a second press is needed in that case.
             for _ in range(2):
-                cursor = widget.textCursor()
-                cursor.clearSelection()
-                widget.setTextCursor(cursor)
+                self._clear_selection()
                 press = QtGui.QMouseEvent(
                     QtCore.QEvent.MouseButtonPress,
                     position,
@@ -378,8 +376,30 @@ class MouseSelectionGuard:
                     Qt.NoModifier,
                 )
                 self._base_press_event(press)
-                if not widget.textCursor().hasSelection():
+                if not self._has_selection():
                     break
+
+    def _clear_selection(self):
+        cursor = self._widget.textCursor()
+        cursor.clearSelection()
+        self._widget.setTextCursor(cursor)
+
+    def _has_selection(self):
+        return self._widget.textCursor().hasSelection()
+
+
+class LabelMouseSelectionGuard(MouseSelectionGuard):
+    """MouseSelectionGuard for selectable QLabels
+
+    QLabel drives the same QWidgetTextControl but only exposes its selection
+    through setSelection() and hasSelectedText().
+    """
+
+    def _clear_selection(self):
+        self._widget.setSelection(0, 0)
+
+    def _has_selection(self):
+        return self._widget.hasSelectedText()
 
 
 class PlainTextEditExtension(BaseTextEditExtension):
@@ -1284,6 +1304,7 @@ class TextLabel(QtWidgets.QLabel):
         self._metrics = QtGui.QFontMetrics(self.font())
         self._saved_selection = None
         self._press_pos = None
+        self._mouse_selection = LabelMouseSelectionGuard(self, super().mousePressEvent)
 
         self.setTextFormat(text_format)
         self.setCursor(Qt.PointingHandCursor)
@@ -1416,6 +1437,13 @@ class TextLabel(QtWidgets.QLabel):
 
     def mousePressEvent(self, event):
         self._saved_selection = self.selectedText()
+        # QLabel does not override mouseDoubleClickEvent(), so QWidget's
+        # default hands double-clicks to mousePressEvent() as well.
+        if self.textInteractionFlags() & Qt.TextSelectableByMouse:
+            if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                self._mouse_selection.double_click(event)
+            else:
+                self._mouse_selection.press(event)
         # Remember where the press started so that mouseReleaseEvent() can tell a
         # plain click (copy-on-click) apart from a click-and-drag (text selection).
         self._press_pos = event.pos()
