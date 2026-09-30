@@ -968,3 +968,23 @@ def test_superseded_deferred_build_bails(qapp, app_context):
 
     win.graphview.add_commits.assert_not_called()
     assert win._graph_stale is True
+
+
+def test_select_moves_the_current_row(qapp, app_context):
+    """Selecting from the graph moves the list's current row and anchor"""
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(20)]
+    tree.add_commits(commits)
+    items = [tree.topLevelItem(idx) for idx in range(tree.topLevelItemCount())]
+    tree.setCurrentItem(items[3])
+
+    tree.select_commits([items[10].commit])
+
+    assert tree.selectedItems() == [items[10]]
+    assert tree.currentItem() is items[10]
+
+    # Down continues from the graph's selection, not the old current row.
+    event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_Down, Qt.NoModifier)
+    tree.keyPressEvent(event)
+    assert tree.currentItem() is items[11]
+    assert tree.selectedItems() == [items[11]]
