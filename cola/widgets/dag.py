@@ -1822,6 +1822,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.clearSelection()
         if not oids:
             return
+        current = None
         for oid in oids:
             try:
                 item = self.oidmap[oid]
@@ -1829,6 +1830,15 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
                 continue
             self.scrollToItem(item)
             item.setSelected(True)
+            if current is None:
+                current = item
+        # setSelected() leaves the current index behind, so arrow keys and
+        # Shift+click would continue from the previously clicked row. Move it
+        # (and with it the Shift+click anchor) without changing the selection.
+        if current is not None:
+            self.selectionModel().setCurrentIndex(
+                self.indexFromItem(current), QtCore.QItemSelectionModel.NoUpdate
+            )
 
     def clear(self):
         """Clear the tree"""
