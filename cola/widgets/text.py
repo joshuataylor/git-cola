@@ -32,6 +32,7 @@ class LineEdit(QtWidgets.QLineEdit):
         self._row = row
         self.cursor_position = LineEditCursorPosition(self, row)
         self.menu_actions = []
+        self._double_clicks = DoubleClickTracker()
         if clear_button and hasattr(self, 'setClearButtonEnabled'):
             self.setClearButtonEnabled(True)
 
@@ -62,6 +63,25 @@ class LineEdit(QtWidgets.QLineEdit):
         if key == Qt.Key_Escape:
             self.esc_pressed.emit()
         super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self._double_clicks.double_click(event)
+        super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event):
+        """Place the cursor instead of selecting all on a stale triple-click
+
+        QLineEdit selects all on any press near a double-click within
+        doubleClickInterval(), even after other clicks, and does not stop its
+        triple-click timer when it fires, so further presses keep selecting
+        all. Skip the base handler for those presses and place the cursor.
+        """
+        if self._double_clicks.is_stale_triple_click(event):
+            self.deselect()
+            self.setCursorPosition(self.cursorPositionAt(event.pos()))
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class LineEditCursorPosition:
@@ -262,6 +282,44 @@ class BaseTextEditExtension(QtCore.QObject):
         return
 
 
+class DoubleClickTracker:
+    """Detect presses that Qt would wrongly take as a triple-click
+
+    Qt's text widgets arm a triple-click when a double-click happens, and take
+    any press within doubleClickInterval() and startDragDistance() of the
+    double-click point as the triple-click, even when other clicks happened in
+    between. Only the first press after the double-click is a genuine
+    triple-click.
+    """
+
+    def __init__(self):
+        self._pos = None
+        self._presses = 0
+        self._elapsed = QtCore.QElapsedTimer()
+
+    def double_click(self, event):
+        """Remember where a double-click happened"""
+        if event.button() != Qt.LeftButton:
+            return
+        self._pos = event.pos()
+        self._presses = 0
+        self._elapsed.start()
+
+    def is_stale_triple_click(self, event):
+        """Would Qt take this press as a triple-click when it is not one?"""
+        if event.button() != Qt.LeftButton or self._pos is None:
+            return False
+        self._presses += 1
+        if self._elapsed.elapsed() >= QtWidgets.QApplication.doubleClickInterval():
+            self._pos = None
+            return False
+        # The first press after a double-click is a genuine triple-click.
+        if self._presses < 2:
+            return False
+        distance = (event.pos() - self._pos).manhattanLength()
+        return distance < QtWidgets.QApplication.startDragDistance()
+
+
 class MouseSelectionGuard:
     """Clear stale double/triple-click state in Qt's text widgets
 
@@ -270,7 +328,7 @@ class MouseSelectionGuard:
 
     - A double-click arms a triple-click for doubleClickInterval(). Any press
       near the double-click point in that window selects the whole line, even
-      when other clicks happened in between.
+      when other clicks happened in between (see DoubleClickTracker).
     - The word/line granularity used to extend a double/triple-click drag is
       only cleared by a plain press that moves the cursor. Clicking inside a
       selection to clear it does not, and neither does a double-click, so a
@@ -284,32 +342,18 @@ class MouseSelectionGuard:
     def __init__(self, widget, base_press_event):
         self._widget = widget
         self._base_press_event = base_press_event
-        self._pos = None
-        self._presses = 0
-        self._elapsed = QtCore.QElapsedTimer()
+        self._double_clicks = DoubleClickTracker()
 
     def double_click(self, event):
         """Reset Qt's state before a double-click and remember where it was"""
         if event.button() != Qt.LeftButton:
             return
         self._reset(event)
-        self._pos = event.pos()
-        self._presses = 0
-        self._elapsed.start()
+        self._double_clicks.double_click(event)
 
     def press(self, event):
         """Stop a press after an intervening click being taken as a triple-click"""
-        if event.button() != Qt.LeftButton or self._pos is None:
-            return
-        self._presses += 1
-        if self._elapsed.elapsed() >= QtWidgets.QApplication.doubleClickInterval():
-            self._pos = None
-            return
-        # The first press after a double-click is a genuine triple-click.
-        if self._presses < 2:
-            return
-        distance = (event.pos() - self._pos).manhattanLength()
-        if distance < QtWidgets.QApplication.startDragDistance():
+        if self._double_clicks.is_stale_triple_click(event):
             self._reset(event)
 
     def _reset(self, event):
