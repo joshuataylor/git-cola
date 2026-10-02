@@ -2,6 +2,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from .. import cmds
+from .. import core
 from .. import dates
 from .. import hidpi
 from .. import icons
@@ -448,6 +449,11 @@ class SettingsFormWidget(FormWidget):
 
         self.linebreak = qtutils.checkbox()
         self.mouse_zoom = qtutils.checkbox()
+        tooltip = N_(
+            'Cmd+Up selects the first category header and Cmd+Down selects\n'
+            'the last file in the Status widget'
+        )
+        self.status_jump_keys = qtutils.checkbox(checked=True, tooltip=tooltip)
         self.keep_merge_backups = qtutils.checkbox()
         self.sort_bookmarks = qtutils.checkbox()
         self.save_window_settings = qtutils.checkbox()
@@ -520,6 +526,10 @@ class SettingsFormWidget(FormWidget):
         self.add_row(N_('Save GUI Settings'), self.save_window_settings)
         self.add_row(N_('Ctrl + MouseWheel to Zoom'), self.mouse_zoom)
         self.add_row(N_('Refresh on Focus'), self.refresh_on_focus)
+        if core.IS_DARWIN:
+            self.add_row(
+                N_('Cmd+Up/Down Jump to Top/Bottom of Status'), self.status_jump_keys
+            )
         self.add_row(N_('Sort Bookmarks Alphabetically'), self.sort_bookmarks)
         self.add_row(N_('Resize File Browser columns'), self.resize_browser_columns)
 
@@ -620,6 +630,10 @@ class SettingsFormWidget(FormWidget):
             prefs.SAFE_MODE: (self.safe_mode, Defaults.safe_mode),
             prefs.SPELL_CHECK: (self.check_spelling, Defaults.spellcheck),
             prefs.MOUSE_ZOOM: (self.mouse_zoom, Defaults.mouse_zoom),
+            prefs.STATUS_JUMP_KEYS: (
+                self.status_jump_keys,
+                Defaults.status_jump_keys,
+            ),
             prefs.NOTIFY_ON_PUSH: (self.notifyonpush, Defaults.notifyonpush),
             prefs.VERBOSITY: (self.verbosity, Defaults.verbosity),
         })

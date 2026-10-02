@@ -10,6 +10,7 @@ from qtpy.QtCore import Qt
 
 from .. import actions
 from .. import cmds
+from .. import core
 from .. import difftool
 from .. import fields
 from .. import hotkeys
@@ -1177,6 +1178,12 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         return None
 
     def select_by_index(self, idx):
+        item = self._file_item(idx)
+        if item is not None:
+            qtutils.select_item(self, item)
+
+    def _file_item(self, idx):
+        """Return the tree item for a flat index into all_files()"""
         c = self.contents()
         to_try = [
             (c.staged, STAGED_IDX),
@@ -1188,12 +1195,9 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             if not content:
                 continue
             if idx < len(content):
-                parent = self.topLevelItem(toplevel_idx)
-                item = parent.child(idx)
-                if item is not None:
-                    qtutils.select_item(self, item)
-                return
+                return self.topLevelItem(toplevel_idx).child(idx)
             idx -= len(content)
+        return None
 
     def staged(self):
         return qtutils.get_selected_values(self, STAGED_IDX, self._model.staged)
@@ -1409,6 +1413,55 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             self.select_by_index(idx + 1)
         else:
             self.select_by_index(0)
+
+    def select_top(self):
+        """Select only the top row: the first non-empty category header"""
+        self._select_only_item(self._first_category_with_children())
+
+    def select_last_file(self):
+        """Select only the last file across all categories"""
+        idx = len(self.all_files()) - 1
+        if idx >= 0:
+            self._select_only_item(self._file_item(idx))
+
+    def _select_only_item(self, item):
+        """Make an item the sole selection and the current item.
+
+        The selection command is explicit because setCurrentItem() otherwise
+        derives it from the live keyboard modifiers: with Cmd (Ctrl) held it
+        toggles, leaving the old selection selected as well.
+        """
+        if item is None:
+            return
+        qtutils.scroll_to_item(self, item)
+        self.setCurrentItem(
+            item,
+            0,
+            QtCore.QItemSelectionModel.ClearAndSelect | QtCore.QItemSelectionModel.Rows,
+        )
+
+    def keyPressEvent(self, event):
+        """Cmd+Up/Cmd+Down jump to the top header/last file on macOS.
+
+        Controlled by cola.statusjumpkeys. Off macOS Ctrl+Up/Ctrl+Down keep Qt's "move focus without selecting"
+        behaviour. macOS tags arrow keys with KeypadModifier, so ignore it.
+        """
+        modifiers = event.modifiers() & ~Qt.KeypadModifier
+        if (
+            core.IS_DARWIN
+            and modifiers == Qt.ControlModifier
+            and prefs.status_jump_keys(self.context)
+        ):
+            key = event.key()
+            if key == Qt.Key_Up:
+                self.select_top()
+                event.accept()
+                return
+            if key == Qt.Key_Down:
+                self.select_last_file()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         """Keep track of whether to drag URLs or just text"""
