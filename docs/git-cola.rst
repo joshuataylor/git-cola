@@ -1318,6 +1318,16 @@ Set to `true` to indent files in the Status widget.  Files in the `Staged`,
 `Modified`, etc. categories will be grouped in a tree-like structure.
 Defaults to `false`.
 
+cola.statusjumpkeys
+-------------------
+
+On macOS, Cmd+Up selects the first category header in the Status widget
+(`Staged`, `Modified`, etc., whichever comes first) and Cmd+Down selects the
+last file. Set to `false` to keep Qt's default behaviour, which moves the
+keyboard focus by one row without changing the selection.
+Has no effect on other platforms, where Ctrl+Up and Ctrl+Down are unchanged.
+Defaults to `true`.
+
 cola.statusshowtotals
 ---------------------
 

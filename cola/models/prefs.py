@@ -86,6 +86,7 @@ SHOW_PATH = 'cola.showpath'
 SORT_BOOKMARKS = 'cola.sortbookmarks'
 SPELL_CHECK = 'cola.spellcheck'
 STATUS_INDENT = 'cola.statusindent'
+STATUS_JUMP_KEYS = 'cola.statusjumpkeys'
 STATUS_SHOW_TOTALS = 'cola.statusshowtotals'
 THEME = 'cola.theme'
 TABWIDTH = 'cola.tabwidth'
@@ -222,6 +223,7 @@ class Defaults:
     hidpi = hidpi.Option.AUTO
     patches_directory = 'patches'
     status_indent = False
+    status_jump_keys = True
     status_show_totals = False
     text_elide_mode = 'middle'
     logdate = DateFormat.DEFAULT
@@ -625,6 +627,11 @@ def textwidth(context) -> int:
 def status_indent(context) -> bool:
     """Should we indent items in the status widget?"""
     return context.cfg.get(STATUS_INDENT, default=Defaults.status_indent)
+
+
+def status_jump_keys(context) -> bool:
+    """Do Cmd+Up/Cmd+Down jump to the top/bottom of the status widget on macOS?"""
+    return context.cfg.get(STATUS_JUMP_KEYS, default=Defaults.status_jump_keys)
 
 
 def status_show_totals(context) -> bool:
