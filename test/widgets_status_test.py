@@ -11,9 +11,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cola import qtutils
+from cola.models import prefs
 from cola.models import selection
 from cola.widgets import status
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
+from qtpy.QtTest import QTest
 
 
 @pytest.fixture(scope='module')
@@ -319,3 +323,128 @@ def test_select_all_with_empty_tree_is_a_safe_noop(widget):
 
     assert _selected_children(widget, status.MODIFIED_IDX) == []
     assert _selected_children(widget, status.UNTRACKED_IDX) == []
+
+
+def _all_selected(widget):
+    return [
+        name
+        for idx in (
+            status.STAGED_IDX,
+            status.UNMERGED_IDX,
+            status.MODIFIED_IDX,
+            status.UNTRACKED_IDX,
+        )
+        for name in _selected_children(widget, idx)
+    ]
+
+
+def _press(widget, key, modifiers):
+    # QTest sets the application's live keyboard modifiers, which is what
+    # setCurrentItem() consults when no explicit selection command is given.
+    QTest.keyClick(widget, key, modifiers)
+
+
+def test_select_top_and_last_file_span_all_categories(widget):
+    """The top header and last file are found across category boundaries."""
+    widget._model.set_contents(
+        staged=['s1', 's2'], modified=['m1'], untracked=['u1', 'u2']
+    )
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified.child(0))
+
+    widget.select_last_file()
+    untracked = widget.topLevelItem(status.UNTRACKED_IDX)
+    assert widget.selectedItems() == [untracked.child(1)]
+    assert widget.currentItem() is untracked.child(1)
+
+    widget.select_top()
+    staged = widget.topLevelItem(status.STAGED_IDX)
+    assert widget.selectedItems() == [staged]
+    assert widget.currentItem() is staged
+
+
+def test_select_top_and_last_file_skip_empty_categories(widget):
+    """Empty leading/trailing categories are skipped."""
+    widget._model.set_contents(modified=['m1', 'm2'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+
+    widget.select_last_file()
+    assert widget.currentItem() is modified.child(1)
+
+    widget.select_top()
+    assert widget.selectedItems() == [modified]
+    assert widget.currentItem() is modified
+
+
+def test_select_top_and_last_file_with_empty_tree_is_a_safe_noop(widget):
+    """Jumping on an empty tree selects nothing."""
+    widget._model.set_contents()
+    widget.refresh()
+
+    widget.select_top()
+    widget.select_last_file()
+
+    assert widget.selectedItems() == []
+
+
+def test_cmd_up_and_down_jump_to_top_header_and_last_file_on_macos(widget, monkeypatch):
+    """Cmd+Up/Cmd+Down (with the macOS arrow KeypadModifier) jump to the ends."""
+    monkeypatch.setattr(status.core, 'IS_DARWIN', True)
+    widget._model.set_contents(staged=['s1'], modified=['m1', 'm2'], untracked=['u1'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    qtutils.select_item(widget, modified.child(0))
+    cmd = Qt.ControlModifier | Qt.KeypadModifier
+
+    _press(widget, Qt.Key_Down, cmd)
+    untracked = widget.topLevelItem(status.UNTRACKED_IDX)
+    assert widget.selectedItems() == [untracked.child(0)]
+
+    _press(widget, Qt.Key_Up, cmd)
+    staged = widget.topLevelItem(status.STAGED_IDX)
+    assert widget.selectedItems() == [staged]
+    assert widget.currentItem() is staged
+
+
+def test_cmd_down_from_header_selects_only_the_last_file(widget, monkeypatch):
+    """Cmd+Down from a selected header moves the selection, not adds to it."""
+    monkeypatch.setattr(status.core, 'IS_DARWIN', True)
+    widget._model.set_contents(modified=['m1', 'm2'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    widget.setCurrentItem(modified)
+
+    _press(widget, Qt.Key_Down, Qt.ControlModifier | Qt.KeypadModifier)
+
+    assert widget.selectedItems() == [modified.child(1)]
+    assert widget.currentItem() is modified.child(1)
+
+
+def test_ctrl_down_keeps_qt_behaviour_off_macos(widget, monkeypatch):
+    """Off macOS Ctrl+Down does not change the selected file."""
+    monkeypatch.setattr(status.core, 'IS_DARWIN', False)
+    widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    qtutils.select_item(widget, modified.child(0))
+
+    _press(widget, Qt.Key_Down, Qt.ControlModifier)
+
+    assert _all_selected(widget) == ['m1']
+
+
+def test_cmd_down_is_left_to_qt_when_jump_keys_are_disabled(widget, monkeypatch):
+    """cola.statusjumpkeys=false leaves Cmd+Down to Qt, so the selection stays."""
+    monkeypatch.setattr(status.core, 'IS_DARWIN', True)
+    config = {prefs.STATUS_JUMP_KEYS: False}
+    widget.context.cfg.get = lambda key, default=None: config.get(key, default)
+    widget._model.set_contents(modified=['m1', 'm2'], untracked=['u1'])
+    widget.refresh()
+    modified = widget.topLevelItem(status.MODIFIED_IDX)
+    qtutils.select_item(widget, modified.child(0))
+
+    _press(widget, Qt.Key_Down, Qt.ControlModifier | Qt.KeypadModifier)
+
+    assert _all_selected(widget) == ['m1']
