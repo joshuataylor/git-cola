@@ -9,6 +9,7 @@ from cola import git
 from cola import gitcfg
 from cola import gitcmds
 from cola import operations_local
+from cola.interaction import Interaction
 from cola.models import main as main_model
 from cola.models import prefs
 from cola.settings import Settings
@@ -45,6 +46,10 @@ def main_view(qapp, tmp_path, monkeypatch):
     # the settings file at a throwaway path so the test never writes to the
     # developer's real ~/.config/git-cola/settings.
     monkeypatch.setattr(Settings, 'config_path', str(tmp_path / 'settings'))
+    # MainView points the global Interaction logging hooks at its log widget.
+    # Restore them on teardown so later tests don't log into a deleted widget.
+    monkeypatch.setattr(Interaction, 'log', Interaction.log)
+    monkeypatch.setattr(Interaction, 'log_status', Interaction.log_status)
 
     context = MagicMock()
     context.ops = operations_local.LocalOperations()
