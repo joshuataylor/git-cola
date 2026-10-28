@@ -1546,6 +1546,8 @@ def _install_config_actions(context, menu, names_and_shortcuts):
         sub_menu, action_name = build_menus(name, menu, cache)
         callback = cmds.run(cmds.RunConfigAction, context, name)
         menu_action = sub_menu.addAction(action_name, callback)
+        # A user-named action such as "Exit..." must not become Quit on macOS.
+        qtutils.disable_app_menu_heuristic(menu_action)
         if shortcut:
             menu_action.setShortcut(shortcut)
 

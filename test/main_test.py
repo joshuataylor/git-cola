@@ -9,6 +9,7 @@ from cola import git
 from cola import gitcfg
 from cola import gitcmds
 from cola import operations_local
+from cola import qtutils
 from cola.interaction import Interaction
 from cola.models import main as main_model
 from cola.models import prefs
@@ -78,6 +79,55 @@ def test_app_menu_actions_have_explicit_roles(main_view):
     assert main_view.preferences_action.menuRole() == action.PreferencesRole
     assert main_view.quit_action.menuRole() == action.QuitRole
     assert main_view.help_about_action.menuRole() == action.AboutRole
+
+
+def test_other_menu_actions_never_take_an_app_menu_role(main_view):
+    """Cocoa must not move e.g. "Exit Diff Mode" into the Quit item.
+
+    With the default TextHeuristicRole the label alone decides, and the
+    merged item then disables Cmd+Q outside diff mode.
+    """
+    action = QtWidgets.QAction
+    assert main_view.exit_diff_mode_action.menuRole() == action.NoRole
+    explicit = {
+        main_view.preferences_action,
+        main_view.quit_action,
+        main_view.help_about_action,
+    }
+    prefixes = qtutils._APP_MENU_ROLE_PREFIXES
+    at_risk = [
+        item.text()
+        for item in main_view.findChildren(action)
+        if item not in explicit
+        and item.menuRole() == action.TextHeuristicRole
+        and item.text().replace('&', '').lower().startswith(prefixes)
+    ]
+    assert at_risk == []
+
+
+def test_edit_actions_keep_the_native_edit_roles(main_view):
+    """Copy/Paste keep the heuristic so native dialogs still get Cmd+C/V"""
+    texts = {
+        item.text(): item.menuRole()
+        for item in main_view.findChildren(QtWidgets.QAction)
+        if item.text() in ('Copy', 'Paste')
+    }
+    assert texts == {
+        'Copy': QtWidgets.QAction.TextHeuristicRole,
+        'Paste': QtWidgets.QAction.TextHeuristicRole,
+    }
+
+
+def test_config_actions_never_take_an_app_menu_role(main_view):
+    """User-defined guitool names like "Exit..." stay in the Actions menu"""
+    menu = QtWidgets.QMenu()
+    main_widget._install_config_actions(
+        main_view.context, menu, [('Exit Review', None), ('Setup/Config', None)]
+    )
+    actions = [item for item in menu.findChildren(QtWidgets.QAction) if item.text()]
+    roles = {item.text(): item.menuRole() for item in actions}
+    assert roles['Exit Review'] == QtWidgets.QAction.NoRole
+    assert roles['Config'] == QtWidgets.QAction.NoRole
 
 
 def test_bookmarks_docks_start_without_widgets(main_view):
