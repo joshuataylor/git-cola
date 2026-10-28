@@ -184,6 +184,7 @@ def _make_qapplication(context):
     instance = app.ColaQApplication.__new__(app.ColaQApplication)
     instance.context = context
     instance._pending_repo_paths = []
+    instance._launch_paths = set()
     return instance
 
 
@@ -231,6 +232,36 @@ def test_open_repo_path_ignores_non_repository(monkeypatch, tmp_path):
 
     assert opened == []
     assert instance._pending_repo_paths == []
+
+
+def test_launch_paths_resolves_file_arguments(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / 'git-cola'
+    script.write_text('')
+    paths = app.launch_paths([str(script), 'dag', '--repo', '-r', ''])
+    assert paths == {
+        core.realpath(str(script)),
+        core.realpath(str(tmp_path / 'dag')),
+    }
+
+
+def test_open_repo_path_ignores_echoed_launch_argument(monkeypatch, app_context):
+    """AppKit echoes the launch script back as a FileOpen event"""
+    opened = []
+    monkeypatch.setattr(app, 'open_worktree', lambda ctx, wt: opened.append(wt))
+    context = MagicMock()
+    context.view = MagicMock()
+    instance = _make_qapplication(context)
+    script = os.path.join(core.getcwd(), 'A')
+    instance._launch_paths = app.launch_paths([script])
+
+    instance.open_repo_path(script)
+    assert opened == []
+    assert instance._pending_repo_paths == []
+
+    # Any other path inside the repository still opens it.
+    instance.open_repo_path(core.getcwd())
+    assert opened == [core.abspath(core.getcwd())]
 
 
 def _load_darwin_plist():

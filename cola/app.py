@@ -417,6 +417,18 @@ def worktree_for_path(path: str) -> str | None:
     return worktree or None
 
 
+def launch_paths(argv: list[str]) -> set[str]:
+    """Return the resolved paths named on the command line.
+
+    Launched from a terminal rather than LaunchServices, AppKit echoes
+    command-line arguments that name existing files back to the app as
+    FileOpen events, e.g. the "git-cola" script itself for a plain
+    "git-cola". Qt only filters these while the app is still launching, and
+    the event can arrive after that, so they are filtered here as well.
+    """
+    return {core.realpath(arg) for arg in argv if arg and not arg.startswith('-')}
+
+
 def open_worktree(context: ApplicationContext, worktree: str) -> None:
     """Open a worktree, reusing an empty window or spawning a new one.
 
@@ -439,12 +451,17 @@ class ColaQApplication(QtWidgets.QApplication):
         # Repositories delivered by macOS FileOpen events before the main
         # window is ready are buffered here and opened once it exists.
         self._pending_repo_paths: list[str] = []
+        # Resolved before the startup chdir into the worktree, while relative
+        # arguments still resolve against the launch directory.
+        self._launch_paths = launch_paths(argv)
         # Make icons sharp in HiDPI screen
         if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
             self.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     def open_repo_path(self, path: str) -> None:
         """Handle a macOS FileOpen event for the given path"""
+        if path and core.realpath(path) in self._launch_paths:
+            return
         worktree = worktree_for_path(path)
         if not worktree:
             return
