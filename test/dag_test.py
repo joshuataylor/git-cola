@@ -10,11 +10,15 @@ from cola.widgets.dag import COMMIT_ROLE
 from cola.widgets.dag import GRAPH_PREV_ROW_ROLE
 from cola.widgets.dag import GRAPH_ROW_ROLE
 from cola.widgets.dag import Commit as GraphicsCommit
+from cola.widgets.dag import CommitFindWidget
 from cola.widgets.dag import CommitTreeWidget
 from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
 from cola.widgets.dag import _prepare_labels_cached
+from cola.widgets.dag import commit_matches
+from cola.widgets.dag import find_matches
+from cola.widgets.dag import next_match
 from cola.widgets.filelist import FileTreeWidgetItem
 from cola.widgets.filelist import FileWidget
 from qtpy import QtCore
@@ -1013,3 +1017,138 @@ def test_select_moves_the_current_row(qapp, app_context):
     tree.keyPressEvent(event)
     assert tree.currentItem() is items[11]
     assert tree.selectedItems() == [items[11]]
+
+
+def test_commit_matches_fields(app_context):
+    """Find matches the summary, author, email, refs and an oid prefix"""
+    commit = _commit_for_columns(app_context)
+    assert commit_matches(commit, 'cut of')
+    assert commit_matches(commit, 'aguilar')
+    assert commit_matches(commit, 'davvid@')
+    assert commit_matches(commit, 'v0.0')
+    assert commit_matches(commit, 'ad454b')
+    assert commit_matches(commit, 'AD454B')
+    # The oid only matches as a prefix, so short hex strings stay meaningful.
+    assert not commit_matches(commit, '5785af')
+    # The committer is not a find field.
+    assert not commit_matches(commit, 'Josh Taylor')
+    assert not commit_matches(commit, '')
+
+
+def test_commit_matches_case_sensitive(app_context):
+    """Match Case compares the text exactly"""
+    commit = _commit_for_columns(app_context)
+    assert commit_matches(commit, 'Aguilar', case_sensitive=True)
+    assert not commit_matches(commit, 'aguilar', case_sensitive=True)
+
+
+def test_find_matches_returns_rows_in_order(app_context):
+    """find_matches returns the indices of the matching commits"""
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(5)]
+    commits[1].summary = 'fix the parser'
+    commits[3].summary = 'Fix the lexer'
+    assert find_matches(commits, 'fix') == [1, 3]
+    assert find_matches(commits, 'Fix', case_sensitive=True) == [3]
+    assert find_matches(commits, 'nothing') == []
+
+
+def test_next_match_steps_and_wraps():
+    """next_match moves forwards and backwards and wraps around the ends"""
+    matches = [2, 5, 9]
+    assert next_match(matches, -1) == 2
+    assert next_match(matches, 2) == 5
+    assert next_match(matches, 9) == 2
+    assert next_match(matches, 2, backwards=True) == 9
+    assert next_match(matches, 5, backwards=True) == 2
+    assert next_match(matches, 7, backwards=True) == 5
+    assert next_match(matches, 5, inclusive=True) == 5
+    assert next_match(matches, 6, inclusive=True) == 9
+    assert next_match(matches, 5, backwards=True, inclusive=True) == 5
+    assert next_match([], 0) is None
+
+
+def _find_tree(app_context):
+    """Build a commit list whose rows 1, 3 and 4 match "fix" """
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(6)]
+    tree.add_commits(commits)
+    items = [tree.topLevelItem(idx) for idx in range(tree.topLevelItemCount())]
+    for row in (1, 3, 4):
+        items[row].commit.summary = f'fix number {row}'
+    tree.commits_changed.emit()
+    find = CommitFindWidget(tree, None)
+    return tree, find, items
+
+
+def test_commit_find_selects_as_you_type(qapp, app_context):
+    """Typing selects the first matching commit and shows the match count"""
+    tree, find, items = _find_tree(app_context)
+    find.text.setText('fix')
+    assert tree.selectedItems() == [items[1]]
+    assert tree.currentItem() is items[1]
+    assert find.count_label.text() == '1/3'
+
+    # Narrowing the text keeps the current commit while it still matches.
+    find.text.setText('fix number 3')
+    assert tree.selectedItems() == [items[3]]
+    assert find.count_label.text() == '1/1'
+
+
+def test_commit_find_next_and_previous(qapp, app_context):
+    """Next and previous step through the matches and wrap around"""
+    tree, find, items = _find_tree(app_context)
+    find.text.setText('fix')
+    find.search()
+    assert tree.selectedItems() == [items[3]]
+    assert find.count_label.text() == '2/3'
+    find.search()
+    find.search()
+    assert tree.selectedItems() == [items[1]]
+    find.search_backwards()
+    assert tree.selectedItems() == [items[4]]
+    assert find.count_label.text() == '3/3'
+
+
+def test_commit_find_no_matches(qapp, app_context):
+    """Text that matches nothing leaves the selection alone"""
+    tree, find, items = _find_tree(app_context)
+    tree.select([items[2].commit.oid])
+    find.text.setText('no such commit')
+    assert tree.selectedItems() == [items[2]]
+    assert find.count_label.text() == ''
+
+
+def test_commit_find_rescans_added_commits(qapp, app_context):
+    """Commits added after a search are found by the next one"""
+    tree, find, items = _find_tree(app_context)
+    find.text.setText('fix')
+    newer = _commit_for_graph(app_context, f'{99:040x}')
+    newer.summary = 'fix in a newer commit'
+    tree.add_commits([newer])
+    tree.setCurrentItem(None)
+    find.search()
+    assert tree.selectedItems()[0].commit is newer
+    assert find.count_label.text() == '1/4'
+
+
+def test_commit_find_escape_hides(qapp, app_context):
+    """Esc hides the find bar and refocuses the widget it was opened from"""
+    tree, find, _items = _find_tree(app_context)
+    window = QtWidgets.QWidget()
+    other = QtWidgets.QLineEdit(window)
+    layout = QtWidgets.QVBoxLayout(window)
+    layout.addWidget(tree)
+    layout.addWidget(find)
+    layout.addWidget(other)
+    window.show()
+    window.activateWindow()
+    other.setFocus()
+    qapp.processEvents()
+
+    find.show_find()
+    assert find.isVisible()
+    find.text.esc_pressed.emit()
+    qapp.processEvents()
+    assert not find.isVisible()
+    assert QtWidgets.QApplication.focusWidget() is other
+    window.close()

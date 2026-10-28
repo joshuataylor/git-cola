@@ -1,4 +1,5 @@
 from __future__ import annotations
+import bisect
 import collections
 import datetime
 import enum
@@ -48,6 +49,7 @@ from . import filelist
 from . import finder
 from . import prefs as prefs_widget
 from . import standard
+from .text import HintedDefaultLineEdit
 
 
 def git_dag(
@@ -1567,6 +1569,8 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
     diff_commits = Signal(object, object)
     search_line_range_in_oid = Signal(object)
     zoom_to_fit = Signal()
+    commits_changed = Signal()
+    """Emitted when rows are added or the tree is cleared"""
 
     def __init__(self, context, parent):
         standard.TreeWidget.__init__(self, parent)
@@ -1853,6 +1857,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.oidmap.clear()
         self._message_tooltips.clear()
         self.commits = []
+        self.commits_changed.emit()
 
     def event(self, event):
         """Show the full commit message when hovering a row"""
@@ -1911,6 +1916,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             head_oid=head_oid,
         )
         self.apply_graph_result(graph_result)
+        self.commits_changed.emit()
 
     def apply_graph_result(self, graph_result) -> None:
         # Rows only describe the chunk that was just added, so resolve them
@@ -1978,6 +1984,176 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
     def leaveEvent(self, event):
         self.graph_delegate.set_hover(None, -1)
         QtWidgets.QTreeWidget.leaveEvent(self, event)
+
+
+def commit_matches(commit, needle, case_sensitive=False):
+    """Does the commit's summary, author, email, refs or oid prefix match?"""
+    if not needle:
+        return False
+    fields = [commit.summary, commit.author, commit.email]
+    fields.extend(commit.tags)
+    oid = commit.oid or ''
+    if not case_sensitive:
+        needle = needle.lower()
+        fields = [field.lower() for field in fields if field]
+        oid = oid.lower()
+    if oid.startswith(needle):
+        return True
+    return any(needle in field for field in fields if field)
+
+
+def find_matches(commits, needle, case_sensitive=False):
+    """Return the indices of the commits that match, in the given order"""
+    return [
+        idx
+        for idx, commit in enumerate(commits)
+        if commit_matches(commit, needle, case_sensitive)
+    ]
+
+
+def next_match(matches, row, backwards=False, inclusive=False):
+    """Return the match after (or before) row, wrapping around the ends
+
+    matches is a sorted list of row indices. With inclusive=True a match on
+    row itself is returned, so find-as-you-type stays put while the current
+    row still matches. Returns None when there are no matches.
+    """
+    if not matches:
+        return None
+    if backwards:
+        if inclusive:
+            idx = bisect.bisect_right(matches, row) - 1
+        else:
+            idx = bisect.bisect_left(matches, row) - 1
+        return matches[idx]  # -1 wraps around to the last match
+    if inclusive:
+        idx = bisect.bisect_left(matches, row)
+    else:
+        idx = bisect.bisect_right(matches, row)
+    if idx >= len(matches):
+        idx = 0
+    return matches[idx]
+
+
+class CommitFindWidget(QtWidgets.QWidget):
+    """The find bar that jumps between matching commits in the commit list"""
+
+    def __init__(self, tree, parent):
+        super().__init__(parent)
+        self.setAutoFillBackground(True)
+        self._tree = tree
+        self._matches = None
+        """Cached row indices of matching commits, None when stale"""
+        self._return_focus = None
+        """The widget that had focus before the find bar, refocused on Esc"""
+
+        self.text = HintedDefaultLineEdit(N_('Find commits'), parent=self)
+        self.text.setToolTip(
+            N_('Find commits by summary, author, email, ref or commit ID')
+        )
+        self.prev_button = qtutils.create_action_button(
+            tooltip=N_('Find the previous matching commit'), icon=icons.up()
+        )
+        self.next_button = qtutils.create_action_button(
+            tooltip=N_('Find the next matching commit'), icon=icons.down()
+        )
+        self.match_case_checkbox = qtutils.checkbox(N_('Match Case'))
+        self.count_label = QtWidgets.QLabel(self)
+        self.close_button = qtutils.create_action_button(
+            tooltip=N_('Close the find bar'), icon=icons.close()
+        )
+
+        layout = qtutils.hbox(
+            defs.margin,
+            defs.button_spacing,
+            self.text,
+            self.prev_button,
+            self.next_button,
+            self.match_case_checkbox,
+            self.count_label,
+            qtutils.STRETCH,
+            self.close_button,
+        )
+        self.setLayout(layout)
+        self.setFocusProxy(self.text)
+
+        self.text.esc_pressed.connect(self.hide_find)
+        self.text.returnPressed.connect(self.search)
+        self.text.textChanged.connect(self._criteria_changed)
+        tree.commits_changed.connect(self.invalidate)
+
+        qtutils.connect_button(self.next_button, self.search)
+        qtutils.connect_button(self.prev_button, self.search_backwards)
+        qtutils.connect_button(self.close_button, self.hide_find)
+        qtutils.connect_checkbox(
+            self.match_case_checkbox, lambda _: self._criteria_changed()
+        )
+
+    def show_find(self):
+        """Show the find bar and focus it, selecting any previous text"""
+        focus = QtWidgets.QApplication.focusWidget()
+        if focus is not None and not self.isAncestorOf(focus):
+            self._return_focus = focus
+        self.show()
+        self.text.setFocus()
+        self.text.selectAll()
+
+    def hide_find(self):
+        """Hide the find bar and return focus to where it was opened from"""
+        self.hide()
+        widget = self._return_focus
+        self._return_focus = None
+        if widget is None or not widget.isVisible():
+            widget = self._tree
+        widget.setFocus()
+
+    def invalidate(self):
+        """Forget the cached matches so the next search rescans the list"""
+        self._matches = None
+
+    def search(self):
+        """Select the next matching commit"""
+        self._jump(backwards=False, inclusive=False)
+
+    def search_backwards(self):
+        """Select the previous matching commit"""
+        self._jump(backwards=True, inclusive=False)
+
+    def _criteria_changed(self, *_args):
+        """Find as you type, staying on the current commit while it matches"""
+        self.invalidate()
+        self._jump(backwards=False, inclusive=True)
+
+    def _matching_rows(self):
+        """Return the matching row indices, rescanning the list when stale"""
+        if self._matches is None:
+            tree = self._tree
+            commits = (
+                tree.topLevelItem(row).commit for row in range(tree.topLevelItemCount())
+            )
+            self._matches = find_matches(
+                commits, self.text.get(), self.match_case_checkbox.isChecked()
+            )
+        return self._matches
+
+    def _current_row(self):
+        """Return the current row of the commit list, or -1 when there is none"""
+        item = self._tree.currentItem()
+        if item is None:
+            return -1
+        return self._tree.indexOfTopLevelItem(item)
+
+    def _jump(self, backwards, inclusive):
+        """Select the next or previous match and update the match count"""
+        matches = self._matching_rows()
+        row = next_match(matches, self._current_row(), backwards, inclusive)
+        if row is None:
+            self.count_label.setText('')
+            return
+        item = self._tree.topLevelItem(row)
+        self._tree.select([item.commit.oid])
+        position = bisect.bisect_left(matches, row) + 1
+        self.count_label.setText(f'{position}/{len(matches)}')
 
 
 class GitDAG(standard.MainWindow):
@@ -2190,7 +2366,16 @@ class GitDAG(standard.MainWindow):
         self.log_dock = qtutils.create_dock(
             'Log', N_('Log'), self, stretch=False, hide_title=True
         )
-        self.log_dock.setWidget(self.treewidget)
+        self.commit_find = CommitFindWidget(self.treewidget, self)
+        self.commit_find.hide()
+        self.log_panel = QtWidgets.QWidget()
+        self.log_panel.setLayout(
+            qtutils.vbox(
+                defs.no_margin, defs.spacing, self.treewidget, self.commit_find
+            )
+        )
+        self.log_panel.setFocusProxy(self.treewidget)
+        self.log_dock.setWidget(self.log_panel)
         log_dock_titlebar = self.log_dock.titleBarWidget()
         log_dock_titlebar.add_corner_widget(self.controls_widget)
 
@@ -2248,6 +2433,21 @@ class GitDAG(standard.MainWindow):
             self, N_('Refresh'), self.refresh, hotkeys.REFRESH
         )
         self.preferences_action = self._create_preferences_action()
+
+        # Cmd+F finds commits from the commit list and the graph. The diff
+        # panel binds the same keys for its own find bar. Each binding is
+        # scoped to its panel, so they never clash.
+        for widget in (self.log_panel, self.graphview):
+            for title, func, hotkey in (
+                (N_('Find Commits'), self.show_commit_find, hotkeys.SEARCH),
+                (N_('Find Next Commit'), self.commit_find.search, hotkeys.SEARCH_NEXT),
+                (
+                    N_('Find Previous Commit'),
+                    self.commit_find.search_backwards,
+                    hotkeys.SEARCH_PREV,
+                ),
+            ):
+                qtutils.add_action(widget, title, func, hotkey)
 
         # Create the application menu
         self.menubar = QtWidgets.QMenuBar(self)
@@ -2355,6 +2555,13 @@ class GitDAG(standard.MainWindow):
         """Enable and disable the display of the WORKTREE and STAGE pseudo-commits"""
         self.params.display_status = enabled
         self.display()
+
+    def show_commit_find(self):
+        """Show the commit find bar, revealing the commit list if it is closed"""
+        if not self.log_dock.isVisible():
+            self.log_dock.show()
+            self.log_dock.raise_()
+        self.commit_find.show_find()
 
     def focus_input(self):
         """Focus the revision input field"""
