@@ -328,3 +328,59 @@ def test_label_shift_click_after_deselected_word_extends_from_cursor(label):
     _wait_out_double_click()
     _click(label, _label_point(label, 40), Qt.ShiftModifier)
     assert label.selectedText() == LABEL_TEXT[17:40]
+
+
+# macOS Option chords type characters instead of firing Alt shortcuts
+
+
+def _override(key, modifiers):
+    return QtGui.QKeyEvent(QtCore.QEvent.ShortcutOverride, key, modifiers)
+
+
+@pytest.fixture
+def darwin(monkeypatch):
+    monkeypatch.setattr(text.core, 'IS_DARWIN', True)
+
+
+@pytest.mark.parametrize('cls', [text.LineEdit, text.PlainTextEdit, text.TextEdit])
+def test_option_chord_overrides_alt_shortcut_on_darwin(qapp, darwin, cls):
+    widget = cls()
+    alt = Qt.AltModifier
+    for event in (
+        _override(Qt.Key_A, alt),
+        _override(Qt.Key_U, alt | Qt.ShiftModifier),
+        _override(Qt.Key_5, alt | Qt.KeypadModifier),
+        _override(Qt.Key_Dead_Diaeresis, alt),
+    ):
+        assert text.types_option_chord(widget, event)
+        event.ignore()
+        widget.event(event)
+        assert event.isAccepted()
+
+
+def test_option_chord_leaves_other_keys_to_shortcuts(qapp, darwin):
+    widget = text.LineEdit()
+    alt = Qt.AltModifier
+    for event in (
+        _override(Qt.Key_Left, alt),  # word navigation, a special key
+        _override(Qt.Key_Return, alt),
+        _override(Qt.Key_A, Qt.ControlModifier | alt),
+        _override(Qt.Key_A, Qt.ControlModifier),
+        QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_A, alt),
+    ):
+        assert not text.types_option_chord(widget, event)
+
+
+def test_option_chord_respects_kept_shortcuts_and_read_only(qapp, darwin):
+    widget = text.PlainTextEdit()
+    text.keep_option_shortcuts(widget, QtGui.QKeySequence(Qt.ALT | Qt.Key_J))
+    assert not text.types_option_chord(widget, _override(Qt.Key_J, Qt.AltModifier))
+    assert text.types_option_chord(widget, _override(Qt.Key_K, Qt.AltModifier))
+    widget.setReadOnly(True)
+    assert not text.types_option_chord(widget, _override(Qt.Key_K, Qt.AltModifier))
+
+
+def test_option_chord_is_darwin_only(qapp, monkeypatch):
+    monkeypatch.setattr(text.core, 'IS_DARWIN', False)
+    widget = text.LineEdit()
+    assert not text.types_option_chord(widget, _override(Qt.Key_A, Qt.AltModifier))
