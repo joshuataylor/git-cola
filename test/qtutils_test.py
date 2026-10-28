@@ -70,3 +70,22 @@ def test_button_box_legacy_keeps_hbox_order(qapp, monkeypatch):
     assert widgets == [other, close, ok]
     # Non-macOS keeps the icons and the padding space from create_button().
     assert ok.text() == ' OK'
+
+
+@pytest.mark.parametrize(
+    'text',
+    ['Exit Diff Mode', '&Quit Review', 'Setup Remotes', 'Options...', 'Tool About'],
+)
+def test_add_action_blocks_app_menu_roles_from_labels(qapp, text):
+    """Labels Cocoa would merge into About/Preferences/Quit get NoRole"""
+    widget = QtWidgets.QWidget()
+    action = qtutils.add_action(widget, text, lambda: None)
+    assert action.menuRole() == QtWidgets.QAction.NoRole
+
+
+@pytest.mark.parametrize('text', ['Copy', 'Paste', 'Stage Modified', 'Push...'])
+def test_add_action_keeps_the_heuristic_for_other_labels(qapp, text):
+    """Cut/Copy/Paste/Select All must still map to the native selectors"""
+    widget = QtWidgets.QWidget()
+    action = qtutils.add_action(widget, text, lambda: None)
+    assert action.menuRole() == QtWidgets.QAction.TextHeuristicRole
