@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 
+from .. import core
 from .. import hotkeys
 from .. import icons
 from .. import qtutils
@@ -21,6 +22,56 @@ from . import defs
 def get_stripped(widget):
     """Return a text value without any leading or trailing whitespace"""
     return widget.get().strip()
+
+
+# Qt key codes from here up are special keys (Escape, arrows, F-keys, ...).
+# Everything below is a character key. Dead keys have their own range.
+_SPECIAL_KEYS_START = 0x01000000
+_DEAD_KEYS = (
+    int(getattr(Qt.Key_Dead_Grave, 'value', Qt.Key_Dead_Grave)),
+    int(getattr(Qt.Key_Dead_Longsolidusoverlay, 'value', 0x01001293)),
+)
+
+
+def keep_option_shortcuts(widget, *sequences):
+    """Let these Option chords keep firing their shortcut inside the widget
+
+    See types_option_chord(). Use it for shortcuts that are meant to work
+    while typing, e.g. the commit editor's Option+J/K file navigation.
+    """
+    widget.kept_option_shortcuts = tuple(sequences)
+
+
+def types_option_chord(widget, event):
+    """Should this macOS Option chord type a character instead of a shortcut?
+
+    On macOS Option is the text-entry modifier: Option+A types "a" with a ring,
+    Option+U is the umlaut dead key, and many layouts put "@", "[" or "{"
+    behind it. Qt offers a key to the shortcut map first, and a text widget
+    only claims plain and Shift-ed keys in ShortcutOverride, so Alt+letter
+    shortcuts such as Stage Modified fired instead of typing. Native menu
+    items do the same: Qt's menu delegate sends a text-less ShortcutOverride
+    and fires the item unless the focus widget accepts it, so this looks at
+    the key code rather than the text.
+    """
+    if not core.IS_DARWIN or event.type() != QtCore.QEvent.ShortcutOverride:
+        return False
+    if widget.isReadOnly():
+        return False
+    modifiers = event.modifiers() & ~Qt.KeypadModifier
+    if modifiers not in (Qt.AltModifier, Qt.AltModifier | Qt.ShiftModifier):
+        return False
+    key = event.key()
+    is_character = 0x20 <= key < _SPECIAL_KEYS_START
+    is_dead_key = _DEAD_KEYS[0] <= key <= _DEAD_KEYS[1]
+    if not is_character and not is_dead_key:
+        return False
+    if hasattr(event, 'keyCombination'):
+        sequence = QtGui.QKeySequence(event.keyCombination())
+    else:  # Qt5
+        sequence = QtGui.QKeySequence(int(event.modifiers()) | key)
+    kept = getattr(widget, 'kept_option_shortcuts', ())
+    return sequence not in kept
 
 
 class LineEdit(QtWidgets.QLineEdit):
@@ -63,6 +114,13 @@ class LineEdit(QtWidgets.QLineEdit):
         if key == Qt.Key_Escape:
             self.esc_pressed.emit()
         super().keyPressEvent(event)
+
+    def event(self, event):
+        """Type macOS Option chords rather than firing Alt shortcuts"""
+        if types_option_chord(self, event):
+            event.accept()
+            return True
+        return super().event(event)
 
     def mouseDoubleClickEvent(self, event):
         self._double_clicks.double_click(event)
@@ -490,6 +548,13 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
         self.cursor_position = self.ext.cursor_position
         self._mouse_selection = MouseSelectionGuard(self, super().mousePressEvent)
 
+    def event(self, event):
+        """Type macOS Option chords rather than firing Alt shortcuts"""
+        if types_option_chord(self, event):
+            event.accept()
+            return True
+        return super().event(event)
+
     def get(self):
         """Return the raw Unicode value from Qt"""
         return self.ext.get()
@@ -741,6 +806,13 @@ class TextEdit(QtWidgets.QTextEdit):
         self.ext = TextEditExtension(self, readonly)
         self.cursor_position = self.ext.cursor_position
         self._mouse_selection = MouseSelectionGuard(self, super().mousePressEvent)
+
+    def event(self, event):
+        """Type macOS Option chords rather than firing Alt shortcuts"""
+        if types_option_chord(self, event):
+            event.accept()
+            return True
+        return super().event(event)
 
     def get(self):
         """Return the raw Unicode value from Qt"""
