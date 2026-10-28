@@ -30,6 +30,7 @@ from .spellcheck import SpellCheckLineEdit
 from .spellcheck import SpellCheckTextEdit
 from .text import event_anchor_mode
 from .text import is_shift_pressed
+from .text import keep_option_shortcuts
 
 
 class CommitMessageEditor(QtWidgets.QFrame):
@@ -109,6 +110,15 @@ class CommitMessageEditor(QtWidgets.QFrame):
         self.description = CommitMessageTextEdit(
             context, check=self.spellcheck, parent=self
         )
+        # Typing wins over Option shortcuts on macOS, except for these, which
+        # are meant to work while writing the message.
+        for widget in (self.summary, self.description):
+            keep_option_shortcuts(
+                widget,
+                hotkeys.MOVE_UP_SECONDARY,
+                hotkeys.MOVE_DOWN_SECONDARY,
+                *hotkeys.AMEND,
+            )
         self.description.menu_actions.extend(menu_actions)
 
         # Render the shortcut from the action so it matches the platform --
