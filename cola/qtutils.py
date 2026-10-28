@@ -819,6 +819,36 @@ def menu_separator(widget: QtWidgets.QWidget, text: str = ''):
     return action
 
 
+# Label patterns Qt's Cocoa plugin uses to guess an application menu role for
+# an action with the default TextHeuristicRole (qcocoamenuitem.mm).
+_APP_MENU_ROLE_PREFIXES = (
+    'about',
+    'config',
+    'preference',
+    'options',
+    'setting',
+    'setup',
+    'quit',
+    'exit',
+)
+
+
+def disable_app_menu_heuristic(action: QtGui.QAction) -> None:
+    """Stop Cocoa moving an action into the macOS application menu by its label
+
+    With the default TextHeuristicRole, a menu bar action whose label starts
+    with e.g. "Exit" or "Setup" (or ends with "About") is merged into the
+    application menu's Quit or Preferences item, which it then takes over.
+    "Exit Diff Mode" became Quit and left Cmd+Q disabled outside diff mode.
+    The real About, Preferences and Quit actions set their roles explicitly.
+    Other labels keep the heuristic, so Cut/Copy/Paste/Select All still map
+    to the native selectors that native file dialogs rely on.
+    """
+    text = (action.text() or '').replace('&', '').strip().lower()
+    if text.startswith(_APP_MENU_ROLE_PREFIXES) or text.endswith('about'):
+        action.setMenuRole(QtWidgets.QAction.NoRole)
+
+
 def _add_action(
     widget: QtWidgets.QWidget,
     text: str | None,
@@ -828,6 +858,7 @@ def _add_action(
     *shortcuts: Any,
 ) -> QtGui.QAction:
     action = QtWidgets.QAction(text, widget)
+    disable_app_menu_heuristic(action)
     if hasattr(action, 'setIconVisibleInMenu'):
         action.setIconVisibleInMenu(True)
     if tip:
