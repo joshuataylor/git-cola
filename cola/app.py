@@ -60,6 +60,7 @@ from . import guicmds
 from . import hidpi
 from . import i18n
 from . import icons
+from . import keyequivalents
 from . import operations
 from . import operations_local
 from . import operations_remote
@@ -314,6 +315,8 @@ class ColaApplication:
         self.theme: themes.Theme | None = None
         self._install_hidpi_config()
         self._app = ColaQApplication(context, list(argv))
+        if core.IS_DARWIN:
+            keyequivalents.install()
         icons.install(icon_themes or get_icon_themes(context))
         # Icons must be installed before setting icons.
         self._app.setWindowIcon(icons.cola())
