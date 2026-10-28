@@ -48,19 +48,25 @@ class LaunchDifftool(cmd.Command):
                 )
             else:
                 cfg = self.cfg
-                terminal_cmd = cfg.terminal()
-                argv = utils.shell_split(terminal_cmd)
-
-                terminal = os.path.basename(argv[0])
-                shellquote_terms = {'xfce4-terminal'}
-                shellquote_default = terminal in shellquote_terms
-
                 mergetool = ['git', 'mergetool', '--no-prompt']
                 tool = prefs.mergetool(self.context)
                 if tool:
                     mergetool.append(f'--tool={tool}')
                 mergetool.append('--')
                 mergetool.extend(paths)
+
+                terminal_cmd = cfg.terminal()
+                if not terminal_cmd:
+                    # No cola.terminal and none of the known terminal
+                    # emulators, e.g. a stock macOS install. Run the merge tool
+                    # directly, which works for GUI merge tools.
+                    core.fork(mergetool, ops=self.context.ops)
+                    return True
+
+                argv = utils.shell_split(terminal_cmd)
+                terminal = os.path.basename(argv[0])
+                shellquote_terms = {'xfce4-terminal'}
+                shellquote_default = terminal in shellquote_terms
                 needs_shellquote = cfg.get(
                     'cola.terminalshellquote', shellquote_default
                 )
