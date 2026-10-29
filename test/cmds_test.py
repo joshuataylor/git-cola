@@ -428,3 +428,38 @@ def test_sequence_editor_runs_wrappers_directly(tmp_path, monkeypatch):
     monkeypatch.setattr(cmds.core, 'IS_WIN32', False)
     monkeypatch.setattr(cmds.resources, 'command', lambda name: str(script))
     assert cmds.sequence_editor() == core.list2cmdline([str(script)])
+
+
+def test_macos_terminal_defaults_to_terminal_app():
+    assert cmds.macos_terminal_argv(None, '/repo') == [
+        'open',
+        '-a',
+        'Terminal',
+        '/repo',
+    ]
+
+
+def test_macos_terminal_passes_the_path_to_open():
+    """open ignores the child's cwd, so the directory goes on the command line"""
+    assert cmds.macos_terminal_argv('open -a iTerm', '/my repo') == [
+        'open',
+        '-a',
+        'iTerm',
+        '/my repo',
+    ]
+
+
+def test_macos_terminal_leaves_other_commands_alone():
+    assert cmds.macos_terminal_argv('kitty', '/repo') is None
+
+
+def test_launch_terminal_on_macos_without_config(monkeypatch):
+    forked = []
+    monkeypatch.setattr(cmds.core, 'IS_DARWIN', True)
+    monkeypatch.setattr(cmds.core, 'IS_WIN32', False)
+    monkeypatch.setattr(cmds.core, 'fork', lambda argv, **kwargs: forked.append(argv))
+    context = Mock()
+    context.cfg.terminal.return_value = None
+    assert cmds.LaunchTerminal.is_available(context)
+    assert cmds.LaunchTerminal(context, '/repo').do()
+    assert forked == [['open', '-a', 'Terminal', '/repo']]

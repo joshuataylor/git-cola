@@ -2271,6 +2271,23 @@ class FormatPatch(Command):
         return True
 
 
+def macos_terminal_argv(cmd: str | None, path: str) -> list[str] | None:
+    """Return the argv for opening a terminal at path on macOS, if special
+
+    None of the terminal emulators cola looks for ship with macOS, so with no
+    cola.terminal it opens Terminal.app with "open -a Terminal <path>". A
+    configured "open -a <App>" is given the path too, because "open" hands
+    the request to LaunchServices and ignores the child's working directory.
+    Returns None when the configured command can be run as usual.
+    """
+    if not cmd:
+        return ['open', '-a', 'Terminal', path]
+    argv = utils.shell_split(cmd)
+    if argv and os.path.basename(argv[0]) == 'open':
+        return argv + [path]
+    return None
+
+
 class LaunchTerminal(Command):
     UNDOABLE = False
 
@@ -2280,7 +2297,7 @@ class LaunchTerminal(Command):
 
     @staticmethod
     def is_available(context: ApplicationContext) -> bool:
-        return context.cfg.terminal() is not None
+        return core.IS_DARWIN or context.cfg.terminal() is not None
 
     def __init__(self, context: ApplicationContext, path) -> None:
         super().__init__(context)
@@ -2288,6 +2305,10 @@ class LaunchTerminal(Command):
 
     def do(self) -> bool:
         cmd = self.context.cfg.terminal()
+        macos_argv = macos_terminal_argv(cmd, self.path) if core.IS_DARWIN else None
+        if macos_argv:
+            core.fork(macos_argv, ops=self.context.ops)
+            return True
         if cmd is None:
             return True
         if core.IS_WIN32:
