@@ -27,17 +27,21 @@ def _unset_key_test():
     os.unsetenv('key_test')
 
 
+def _test_server_port():
+    """The port for both ends, so parallel runs can use different ports"""
+    return int(os.environ.get('GIT_COLA_TEST_SERVER_PORT', 49178))
+
+
 class create_test_server:
     def __init__(self):
-        app = server.SocketServer('127.0.0.1', 49178, True)
+        app = server.SocketServer('127.0.0.1', _test_server_port(), True)
 
         self.server_thread = multiprocessing.Process(target=app.run, daemon=True)
         self.server_thread.start()
         time.sleep(0.4)
 
     def __enter__(self):
-        port = int(os.environ.get('GIT_COLA_TEST_SERVER_PORT', 49178))
-        self.socket = server.SocketClient(ip='127.0.0.1', port=port)
+        self.socket = server.SocketClient(ip='127.0.0.1', port=_test_server_port())
         self.ops_remote = operations_remote.RemoteOperations(self.socket)
         self.ops_local = operations_local.LocalOperations()
         return self
