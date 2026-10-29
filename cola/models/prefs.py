@@ -310,6 +310,14 @@ def editor(context) -> str:
 def background_editor(context) -> str:
     """Return the configured non-blocking background editor"""
     app = context.cfg.get(BACKGROUND_EDITOR, default=editor(context))
+    if (
+        core.IS_DARWIN
+        and app == Defaults.editor
+        and not context.ops.find_executable(Defaults.editor)
+    ):
+        # Nothing configured and no gvim, which macOS does not ship. Open
+        # the file in the default text editor instead of failing to exec.
+        return 'open -t'
     return _remap_editor(app)
 
 
@@ -382,10 +390,11 @@ def enable_gravatar_cache(context) -> bool:
 
 def default_history_browser() -> str:
     """Return the default history browser (e.g. git-dag, gitk)"""
-    if core.IS_WIN32:
+    if core.IS_WIN32 or core.IS_DARWIN:
         # On Windows, a sensible default is "python git-cola dag"
         # which is different than `gitk` below, but is preferred
-        # because we don't have to guess paths.
+        # because we don't have to guess paths. macOS's git does not ship
+        # gitk at all.
         git_cola = sys.argv[0].replace('\\', '/')
         python = sys.executable.replace('\\', '/')
         argv = core.prep_for_subprocess([python, git_cola, 'dag'])
