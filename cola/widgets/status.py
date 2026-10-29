@@ -490,17 +490,19 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             if len(new) >= len(old):
                 # The list did not shrink so it is not one of these cases.
                 continue
-            for item in sel:
-                # The item still exists so ignore it
-                if item in new or item not in old:
-                    continue
-                # The item no longer exists in this list so search for
-                # its nearest neighbors and select them instead.
-                idx = old.index(item)
-                for j in itertools.chain(old[idx + 1 :], reversed(old[:idx])):
-                    if j in new:
-                        reselect(j, current=True)
-                        return
+            # Take the first selected item that left this list, in list order,
+            # and select its nearest remaining neighbour, below and then above.
+            # Every such item has the same remaining candidates, so one search
+            # is enough. Going by list order also makes the choice the same
+            # on every run, where the order of the "sel" set depends on the
+            # string hash seed.
+            for idx, item in enumerate(old):
+                if item in sel and item not in new:
+                    for j in itertools.chain(old[idx + 1 :], reversed(old[:idx])):
+                        if j in new:
+                            reselect(j, current=True)
+                            return
+                    break
 
         # If we already reselected stuff then there's nothing more to do.
         if did_reselect:
