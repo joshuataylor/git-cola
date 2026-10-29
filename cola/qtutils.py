@@ -1232,6 +1232,18 @@ class DockTitleBarWidget(QtWidgets.QFrame):
         self.toggle_button.setVisible(floating)
 
 
+def keep_tool_window_visible(widget: QtWidgets.QWidget) -> None:
+    """Keep a floating dock or toolbar on screen when another app is active
+
+    A floating QDockWidget, or a toolbar restored as Qt.Tool, is a Cocoa tool
+    panel with hidesOnDeactivate set unless WA_MacAlwaysShowToolWindow is set
+    (qcocoawindow.mm). A Diff dock floated onto a second display vanished as
+    soon as you switched to an editor or terminal. Qt copies the attribute to
+    the native window when it is created, so set it before the widget floats.
+    """
+    widget.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
+
+
 def create_dock(
     name: str,
     title: str,
@@ -1243,6 +1255,7 @@ def create_dock(
 ) -> QtWidgets.QDockWidget:
     """Create a dock widget and set it up accordingly."""
     dock = QtWidgets.QDockWidget(parent)
+    keep_tool_window_visible(dock)
     dock.setWindowTitle(title)
     dock.setObjectName(name)
     titlebar = DockTitleBarWidget(dock, title, stretch=stretch, hide_title=hide_title)
