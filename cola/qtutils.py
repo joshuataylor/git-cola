@@ -1827,19 +1827,41 @@ def select_item(widget: QtWidgets.QWidget, item: Any) -> None:
     item.setSelected(True)
 
 
+def _selected_child_rows(widget: QtWidgets.QWidget, top_level_idx: int) -> list[int]:
+    """Return the rows of the selected children of a top-level item, in order
+
+    The selection model lists only what is selected, where asking every child
+    isSelected() scans the whole section: tens of thousands of files in a
+    large worktree, for every section and every selection change.
+    """
+    rows = set()
+    for index in widget.selectionModel().selectedIndexes():
+        if index.column() != 0:
+            continue
+        parent = index.parent()
+        if (
+            parent.isValid()
+            and parent.row() == top_level_idx
+            and not parent.parent().isValid()
+        ):
+            rows.add(index.row())
+    return sorted(rows)
+
+
 def get_selected_values(
     widget: QtWidgets.QWidget, top_level_idx: int, values: Any
 ) -> list[Any]:
     """Map the selected items under the top-level item to the values list"""
-    # Get the top-level item
     item = widget.topLevelItem(top_level_idx)
-    return tree_selection(item, values)
+    count = min(item.childCount(), len(values))
+    rows = _selected_child_rows(widget, top_level_idx)
+    return [values[row] for row in rows if row < count]
 
 
 def get_selected_items(widget: QtWidgets.QWidget, idx: int) -> list[Any]:
     """Return the selected items under the top-level item"""
     item = widget.topLevelItem(idx)
-    return tree_selection_items(item)
+    return [item.child(row) for row in _selected_child_rows(widget, idx)]
 
 
 def add_menu_actions(menu: Any, menu_actions: Any) -> None:
