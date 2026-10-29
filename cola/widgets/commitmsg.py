@@ -336,7 +336,11 @@ class CommitMessageEditor(QtWidgets.QFrame):
 
     def _background_init(self):
         """Called when the app is ready for events"""
-        self.context.runtask.run(self.spellcheck.init)
+        # Loading the dictionary takes about 150 ms of Python and 27 MB, so
+        # skip it while spell checking is off. Enabling it later initialises
+        # on the first check.
+        if prefs.spellcheck(self.context):
+            self.context.runtask.run(self.spellcheck.init)
 
     def config_changed(self, key, value):
         if key != prefs.SPELL_CHECK:
