@@ -2,6 +2,8 @@
 import os
 from unittest.mock import MagicMock
 
+import pytest
+
 from cola import core
 from cola import gitcmds
 
@@ -429,3 +431,35 @@ def test_commit_web_url_for_github_and_bitbucket():
 
 def test_commit_web_url_without_remotes_is_empty():
     assert '' == gitcmds.commit_web_url(_remotes_context({}), 'abc')
+
+
+@pytest.mark.parametrize('accepts_input', [True, False])
+def test_add_stages_many_awkward_paths(app_context, monkeypatch, accepts_input):
+    """Paths go through stdin in chunks, or as argument slices without it"""
+    monkeypatch.setattr(gitcmds, 'ADD_CHUNK_SIZE', 7)
+    monkeypatch.setattr(app_context.ops, 'accepts_input', accepts_input)
+    helper.commit_files()
+    names = [f'file {i:02d} é.txt' for i in range(20)] + ['tab\there.txt']
+    for name in names:
+        helper.touch(name)
+    status, out, _ = gitcmds.add(app_context, names)
+    assert status == 0
+    assert 'add ' in out
+    staged = helper.run_git('diff', '--cached', '--name-only', '-z').split('\0')
+    assert sorted(path for path in staged if path) == sorted(names)
+
+    # u=True stages deletions.
+    for name in names[:3]:
+        os.remove(name)
+    status, _, _ = gitcmds.add(app_context, names[:3], u=True)
+    assert status == 0
+    staged = helper.run_git('diff', '--cached', '--name-only', '-z').split('\0')
+    assert sorted(path for path in staged if path) == sorted(names[3:])
+
+
+def test_add_with_no_paths_runs_nothing(app_context, monkeypatch):
+    git_add = MagicMock()
+    monkeypatch.setattr(app_context.git, 'add', git_add, raising=False)
+    status, _, _ = gitcmds.add(app_context, [])
+    assert status == 0
+    git_add.assert_not_called()

@@ -14,6 +14,9 @@ class CmdOutputToFile:
 
 
 class IOperations(ABC):
+    #: Can run_command() feed "input" to the command's stdin?
+    accepts_input = False
+
     @abstractmethod
     def is_remote(self) -> bool:
         pass
