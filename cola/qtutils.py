@@ -1897,11 +1897,13 @@ def qt_index_from_codepoint(s: str, codepoint_index: int) -> int:
     """Convert a Python codepoint index into a Qt UTF-16 index."""
     if codepoint_index <= 0:
         return 0
-    codepoint_index = min(len(s), codepoint_index)
-    u = 0
-    for ch in s[:codepoint_index]:
-        u += 2 if ord(ch) > 0xFFFF else 1
-    return u
+    prefix = s[:codepoint_index]
+    # Diff highlighting calls this for every line, so avoid a Python loop per
+    # character: ASCII maps 1:1, and otherwise a UTF-16 encode counts the code
+    # units in C (characters beyond the BMP take two).
+    if prefix.isascii():
+        return len(prefix)
+    return len(prefix.encode('utf-16-le', 'surrogatepass')) // 2
 
 
 def qt_span_from_codepoint(
