@@ -142,3 +142,26 @@ def test_set_diff_renders_again_after_another_write(qapp, app_context):
     edit.clear()
     edit.set_diff(_DIFF)
     assert edit.toPlainText() == _DIFF.rstrip('\n')
+
+
+def _bad_whitespace_start(app_context, line):
+    """Return where the bad-whitespace format starts on an added line, or None"""
+    from cola.widgets.diff import DiffTextEdit
+
+    edit = DiffTextEdit(app_context, None)
+    edit.set_diff('@@ -1 +1 @@\n-old\n' + line + '\n')
+    block = edit.document().findBlockByNumber(2)
+    bad = edit.highlighter.bad_whitespace_fmt.background()
+    starts = [
+        fmt.start for fmt in block.layout().formats() if fmt.format.background() == bad
+    ]
+    return starts[0] if starts else None
+
+
+def test_added_lines_mark_only_their_trailing_whitespace(qapp, app_context):
+    """Long padded runs mid-line, as in Markdown tables, are not trailing"""
+    padded = '+| a' + ' ' * 3000 + '| b' + ' ' * 2000 + '|'
+    assert _bad_whitespace_start(app_context, padded) is None
+    assert _bad_whitespace_start(app_context, padded + ' \t ') == len(padded)
+    assert _bad_whitespace_start(app_context, '+text') is None
+    assert _bad_whitespace_start(app_context, '+text ') == len('+text')
