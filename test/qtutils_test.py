@@ -219,3 +219,9 @@ def test_toggle_zoom(qapp):
     assert window.isMaximized()
     qtutils.toggle_zoom(window)
     assert not window.isMaximized()
+
+
+def test_default_monospace_font_on_macos_has_a_bold_face(qapp, monkeypatch):
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
+    monkeypatch.setattr(qtutils.core, 'IS_WIN32', False)
+    assert qtutils.default_monospace_font().family() == 'Menlo'
