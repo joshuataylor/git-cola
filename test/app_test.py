@@ -238,11 +238,30 @@ def test_launch_paths_resolves_file_arguments(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     script = tmp_path / 'git-cola'
     script.write_text('')
+    monkeypatch.setattr(sys, 'orig_argv', ['python', '-X', 'dev'], raising=False)
     paths = app.launch_paths([str(script), 'dag', '--repo', '-r', ''])
     assert paths == {
         core.realpath(str(script)),
         core.realpath(str(tmp_path / 'dag')),
+        core.realpath('python'),
+        core.realpath('dev'),
     }
+
+
+def test_launch_paths_include_the_real_process_argv(tmp_path, monkeypatch):
+    """AppKit echoes the process argv even when sys.argv was rewritten"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys, 'orig_argv', ['python', 'script.py', 'ctrl'], raising=False
+    )
+    paths = app.launch_paths(['script.py'])
+    assert core.realpath(str(tmp_path / 'ctrl')) in paths
+
+
+def test_worktree_for_path_ignores_missing_paths(app_context):
+    """A FileOpen for a path that does not exist must not open its repo"""
+    missing = os.path.join(core.getcwd(), 'no-such-file')
+    assert app.worktree_for_path(missing) is None
 
 
 def test_open_repo_path_ignores_echoed_launch_argument(monkeypatch, app_context):
