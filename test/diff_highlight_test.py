@@ -74,3 +74,29 @@ def test_clear_intraline_spans_does_not_rehighlight(qapp, app_context):
     highlighter.clear_intraline_spans()
     assert highlighter._intraline_spans == {}
     assert len(calls) == 1  # unchanged: no extra pass
+
+
+def test_preset_intraline_spans_does_not_rehighlight(qapp, app_context):
+    """Spans for the next document are stored without a highlight pass"""
+    highlighter, calls = _make_highlighter(app_context)
+    highlighter.preset_intraline_spans({3: [(0, 1)]})
+    assert highlighter._intraline_spans == {3: [(0, 1)]}
+    assert calls == []
+
+
+def _diff_text_edit(app_context):
+    from cola.widgets.diff import DiffTextEdit
+
+    widget = DiffTextEdit(app_context, None)
+    calls = []
+    widget.highlighter.rehighlight = lambda: calls.append(1)
+    return widget, calls
+
+
+def test_set_diff_highlights_once_with_intraline_spans(qapp, app_context):
+    """The spans are in place before setPlainText, so no second pass runs"""
+    widget, calls = _diff_text_edit(app_context)
+    diff = '@@ -1 +1 @@\n-total = compute_total(items, tax=0.10)\n+total = compute_total(items, tax=0.15)\n'
+    widget.set_diff(diff)
+    assert widget.highlighter._intraline_spans
+    assert calls == []
