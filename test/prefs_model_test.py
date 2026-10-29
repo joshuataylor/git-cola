@@ -54,3 +54,23 @@ def test_default_history_browser_is_gitk_on_linux(monkeypatch):
     monkeypatch.setattr(prefs.core, 'IS_DARWIN', False)
     monkeypatch.setattr(prefs.core, 'IS_WIN32', False)
     assert prefs.default_history_browser() == 'gitk'
+
+
+def test_blocking_editor_waits_for_textedit_on_macos(monkeypatch):
+    """GIT_EDITOR must block until editing is done (rebase reword)"""
+    monkeypatch.setattr(prefs.core, 'IS_DARWIN', True)
+    monkeypatch.setattr(prefs, 'fallback_editor', lambda: prefs.Defaults.editor)
+    assert prefs.editor(_context()) == 'open -W -n -t'
+
+
+def test_blocking_editor_keeps_configured_or_installed_editors(monkeypatch):
+    monkeypatch.setattr(prefs.core, 'IS_DARWIN', True)
+    monkeypatch.setattr(prefs, 'fallback_editor', lambda: prefs.Defaults.editor)
+    assert prefs.editor(_context(executables=('gvim',))) == 'gvim'
+    assert prefs.editor(_context({prefs.EDITOR: 'vim'})) == 'gvim -f'
+
+
+def test_background_editor_setting_wins(monkeypatch):
+    monkeypatch.setattr(prefs.core, 'IS_DARWIN', True)
+    context = _context({prefs.BACKGROUND_EDITOR: 'code'})
+    assert prefs.background_editor(context) == 'code'
