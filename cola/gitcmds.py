@@ -4,6 +4,7 @@ import json
 import os
 import re
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from typing import TYPE_CHECKING
 from typing import Any
@@ -966,26 +967,38 @@ def worktree_state(
 
     :rtype: dict, keys are staged, unstaged, untracked, unmerged,
             changed_upstream, and submodule.
-    """
-    if update_index:
-        context.git.update_index(refresh=True)
 
-    staged, unmerged, staged_deleted, staged_submods = diff_index(
-        context, head, paths=paths
-    )
-    modified, unstaged_deleted, modified_submods = diff_worktree(context, paths)
-    if display_untracked:
-        untracked = untracked_files(context, paths=paths)
-    else:
-        untracked = []
+    The git commands only read, apart from the index refresh, so they run
+    concurrently. Starting a git process dominates their cost (about 6 ms
+    each on macOS), so this takes two process lifetimes rather than six.
+    """
+    # GitConfig reloads lazily without locking, so read it before the workers start.
+    tracked = tracked_branch(context)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        # Look for upstream modified files if this is a tracking branch.
+        upstream = pool.submit(_diff_tracked, context, head, tracked)
+        # The untracked walk is the slowest call in a large worktree and does
+        # not use the index's stat data, so it overlaps the refresh. git
+        # replaces the index by renaming a lock file over it, so a concurrent
+        # reader sees either the old or the new index.
+        if display_untracked:
+            untracked_job = pool.submit(untracked_files, context, paths=paths)
+        else:
+            untracked_job = None
+        if update_index:
+            context.git.update_index(refresh=True)
+        index = pool.submit(diff_index, context, head, paths=paths)
+        worktree = pool.submit(diff_worktree, context, paths)
+
+    staged, unmerged, staged_deleted, staged_submods = index.result()
+    modified, unstaged_deleted, modified_submods = worktree.result()
+    untracked = untracked_job.result() if untracked_job is not None else []
+    upstream_changed = upstream.result()
 
     # Remove unmerged paths from the modified list
     if unmerged:
         unmerged_set = set(unmerged)
         modified = [path for path in modified if path not in unmerged_set]
-
-    # Look for upstream modified files if this is a tracking branch
-    upstream_changed = diff_upstream(context, head)
 
     # Keep stuff sorted
     staged.sort()
@@ -1094,7 +1107,13 @@ def diff_worktree(
 
 def diff_upstream(context: ApplicationContext, head: str) -> list[Any | str]:
     """Given `ref`, return $(git merge-base ref HEAD)..ref."""
-    tracked = tracked_branch(context)
+    return _diff_tracked(context, head, tracked_branch(context))
+
+
+def _diff_tracked(
+    context: ApplicationContext, head: str, tracked: str | None
+) -> list[Any | str]:
+    """Return $(git merge-base head tracked)..tracked for a known tracked branch"""
     if not tracked:
         return []
     base = merge_base(context, head, tracked)
