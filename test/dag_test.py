@@ -154,6 +154,31 @@ def test_repo_reader_timestamps(core, dag_context):
 
 
 @patch('cola.models.dag.core')
+def test_repo_reader_shares_repeated_strings_and_empty_labels(core, dag_context):
+    """Names and emails are stored once, and unlabelled commits allocate nothing"""
+    commit_files()
+    dag_context.context.model.update_status()
+    _mock_core_git_log(core, LOG_TEXT)
+    commits = list(dag_context.reader.get())
+    assert len(commits) == len(LOG_LINES)
+    authors = [commit for commit in commits if commit.author == 'David Aguilar']
+    assert len(authors) > 1
+    assert all(commit.author is authors[0].author for commit in authors)
+    assert all(commit.email is authors[0].email for commit in authors)
+    assert all(commit.committer is authors[0].author for commit in authors)
+
+    labelled = [commit for commit in commits if commit.tags]
+    unlabelled = [commit for commit in commits if not commit.tags]
+    assert labelled and unlabelled
+    assert all(commit.tags is unlabelled[0].tags for commit in unlabelled)
+    assert all(isinstance(commit.tags, list) for commit in labelled)
+    assert labelled[0].tags is not unlabelled[0].tags
+    # data() hands out a copy, never the shared or live label list.
+    assert labelled[0].data()['tags'] == labelled[0].tags
+    assert labelled[0].data()['tags'] is not labelled[0].tags
+
+
+@patch('cola.models.dag.core')
 def test_repo_reader_contract(core, dag_context):
     commit_files()
     dag_context.context.model.update_status()

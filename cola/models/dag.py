@@ -172,11 +172,20 @@ def _parse_timestamp(value: str) -> int:
 class CommitFactory:
     root_generation = 0
     commits = {}
+    # One copy of each author/committer name and email, which repeat across
+    # thousands of commits. Cleared with the commits, unlike sys.intern().
+    strings: dict[str, str] = {}
 
     @classmethod
     def reset(cls) -> None:
         cls.commits.clear()
+        cls.strings.clear()
         cls.root_generation = 0
+
+    @classmethod
+    def share(cls, value: str) -> str:
+        """Return the shared copy of a string that repeats across commits"""
+        return cls.strings.setdefault(value, value)
 
     @classmethod
     def new(
@@ -280,8 +289,10 @@ class Commit:
         self.summary: str | None = None
         self.parents: list[Commit] = []
         self.children = []
-        self.tags: list[str] = []
-        self.branches = []
+        # Most commits have no labels, so they share an empty tuple until
+        # add_label() gives them a list of their own.
+        self.tags: list[str] | tuple[str, ...] = ()
+        self.branches: list[str] | tuple[str, ...] = ()
         self.email: str | None = None
         self.author: str | None = None
         self.authdate: str | None = None
@@ -323,13 +334,14 @@ class Commit:
             summary,
         ) = details
 
+        share = CommitFactory.share
         self.summary = summary if summary else ''
-        self.author = author if author else ''
+        self.author = share(author)
         self.authdate = authdate if authdate else ''
-        self.email = email if email else ''
-        self.committer = committer if committer else ''
+        self.email = share(email)
+        self.committer = share(committer)
         self.commitdate = commitdate if commitdate else ''
-        self.committer_email = committer_email if committer_email else ''
+        self.committer_email = share(committer_email)
         self.timestamp = _parse_timestamp(timestamp)
         self.committer_timestamp = _parse_timestamp(committer_timestamp)
 
@@ -356,6 +368,8 @@ class Commit:
         tag = tag.removeprefix('tag: ')  # strip off "tag: " leaving refs/tags/
         if tag.startswith('refs/heads/'):
             branch = tag[11:]
+            if not isinstance(self.branches, list):
+                self.branches = []
             self.branches.append(branch)
         tag = tag.removeprefix('refs/')
         if tag.endswith('/HEAD'):
@@ -390,6 +404,8 @@ class Commit:
         #
         # C.f. http://thread.gmane.org/gmane.linux.kernel/1931234
         head_arrow = 'HEAD -> '
+        if not isinstance(self.tags, list):
+            self.tags = []
         if tag.startswith(head_arrow):
             self.tags.append('HEAD')
             self.add_label(tag[len(head_arrow) :])
@@ -406,7 +422,7 @@ class Commit:
             'author': self.author,
             'authdate': self.authdate,
             'parents': [p.oid for p in self.parents],
-            'tags': self.tags,
+            'tags': list(self.tags),
         }
         if self.signature:
             data['signature'] = self.signature
