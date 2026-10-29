@@ -2403,6 +2403,9 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # time.monotonic() of the previous selection. The first selection after
         # a pause loads at once; only a burst of selections is debounced.
         self._last_selection = None
+        # Bumped when the cache is cleared, so a prefetch that finishes after a
+        # DAG reload cannot repopulate it with stale diffs.
+        self._cache_generation = 0
         # Monotonic token used to discard results from superseded diff tasks.
         # Each started task captures the current value; set_diff only applies a
         # result when its token still matches, so a slow diff that finishes
@@ -2658,15 +2661,48 @@ class CommitDiffWidget(QtWidgets.QWidget):
         # so those are not cached. The token guard above guarantees that a
         # non-None token matches the diff currently on display.
         if token is not None and self._diff_key_cacheable(self._displayed_diff_key):
-            key = self._displayed_diff_key
-            self._diff_cache[key] = diff
-            self._diff_cache.move_to_end(key)
-            while len(self._diff_cache) > self._DIFF_CACHE_MAX:
-                self._diff_cache.popitem(last=False)
+            self._store_diff(self._displayed_diff_key, diff)
+
+    def _store_diff(self, key, diff):
+        """Insert a raw diff into the most-recently-used cache"""
+        self._diff_cache[key] = diff
+        self._diff_cache.move_to_end(key)
+        while len(self._diff_cache) > self._DIFF_CACHE_MAX:
+            self._diff_cache.popitem(last=False)
 
     def clear_diff_cache(self):
         """Drop cached diff text, e.g. when the DAG reloads its commits"""
         self._diff_cache.clear()
+        self._cache_generation += 1
+
+    def prefetch(self, oids):
+        """Warm the diff cache for commits likely to be selected next
+
+        Runs in the background and only fills the cache: nothing is rendered
+        and the staleness token is untouched, so the diff on display is never
+        affected.
+        """
+        missing = [
+            oid
+            for oid in oids
+            if self._diff_key_cacheable((oid, None))
+            and (oid, None) not in self._diff_cache
+        ]
+        if not missing:
+            return
+        task = qtutils.SimpleTask(prefetch_diffs, self.context, missing)
+        self.context.runtask.start(
+            task, result=partial(self._prefetched, self._cache_generation)
+        )
+
+    def _prefetched(self, generation, diffs):
+        """Store prefetched diffs unless the cache was cleared meanwhile"""
+        if generation != self._cache_generation:
+            return
+        for oid, diff in diffs:
+            key = (oid, None)
+            if key not in self._diff_cache:
+                self._store_diff(key, diff)
 
     def set_details(self, oid, author, email, date, summary):
         template_args = {'author': author, 'email': email}
@@ -2737,6 +2773,11 @@ class DiffPanel(QtWidgets.QWidget):
         if not self.search_widget.isVisible():
             self.search_widget.show()
         self.search_widget.setFocus()
+
+
+def prefetch_diffs(context, oids):
+    """Return (oid, raw diff) pairs, as DiffInfoTask would load them"""
+    return [(oid, gitcmds.diff_info(context, oid)) for oid in oids]
 
 
 class DiffInfoTask(qtutils.Task):
