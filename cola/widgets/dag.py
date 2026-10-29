@@ -1110,23 +1110,46 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
             pen.setWidth(self.EDGE_WIDTH)
             pen.setCapStyle(Qt.FlatCap)
 
+            colors = EdgeColor.colors
+            lane_x = rect.left() + lane_w // 2
+            # A wide history passes a hundred or more lanes through each row.
+            # Their straight segments are drawn with one drawLines() per color
+            # rather than a pen change and drawLine() each.
+            batched = {}
+
             # Top half: edges from the previous row arrive vertically.
             if prev_row is not None:
                 for edge in prev_row.edges_to_parent:
-                    color = EdgeColor.colors[edge.color_index % len(EdgeColor.colors)]
-                    pen.setColor(color)
-                    painter.setPen(pen)
-                    to_x = rect.left() + edge.to_column * lane_w + lane_w // 2
-                    painter.drawLine(to_x, top_y, to_x, mid_y)
+                    to_x = lane_x + edge.to_column * lane_w
+                    batched.setdefault(edge.color_index % len(colors), []).append(
+                        QtCore.QLine(to_x, top_y, to_x, mid_y)
+                    )
+
+            # Bottom half: the pass-through lanes come first and are straight.
+            # The rest are drawn one by one, in order, as before.
+            edges = row.edges_to_parent if row is not None else []
+            first_unbatched = len(edges)
+            for position, edge in enumerate(edges):
+                if edge.from_column != edge.to_column:
+                    first_unbatched = position
+                    break
+                x_val = lane_x + edge.from_column * lane_w
+                batched.setdefault(edge.color_index % len(colors), []).append(
+                    QtCore.QLine(x_val, mid_y, x_val, bottom_y)
+                )
+            for color_index, lines in batched.items():
+                pen.setColor(colors[color_index])
+                painter.setPen(pen)
+                painter.drawLines(lines)
 
             # Bottom half: straight or spline depending on diagonal.
             if row is not None:
-                for edge in row.edges_to_parent:
-                    color = EdgeColor.colors[edge.color_index % len(EdgeColor.colors)]
+                for edge in edges[first_unbatched:]:
+                    color = colors[edge.color_index % len(colors)]
                     pen.setColor(color)
                     painter.setPen(pen)
-                    from_x = rect.left() + edge.from_column * lane_w + lane_w // 2
-                    to_x = rect.left() + edge.to_column * lane_w + lane_w // 2
+                    from_x = lane_x + edge.from_column * lane_w
+                    to_x = lane_x + edge.to_column * lane_w
                     if edge.from_column == edge.to_column:
                         painter.drawLine(from_x, mid_y, to_x, bottom_y)
                     else:

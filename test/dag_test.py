@@ -1250,3 +1250,53 @@ def test_graph_cells_skip_rows_where_a_tag_would_overlap():
     # A tagged node is pushed past row 5 too, and records its cell.
     assert view.alloc_cell(-2, ['v1.0']) == 6
     assert view.tagged_rows[6] == {-2}
+
+
+def test_inline_graph_paints_every_lane_in_its_colour(qapp):
+    """Pass-through lanes are batched by colour, the merge curve drawn after"""
+    from cola.models.graph import build_graph
+    from cola.widgets.dag import EdgeColor
+    from cola.widgets.dag import GraphDelegate
+
+    # Four side branches stay open across "mid", which merges one of them.
+    commits = [('base', [])]
+    commits += [(f'side{i}', ['base']) for i in range(4)]
+    commits += [('mid', ['base', 'side0']), ('top', ['mid', 'side1', 'side2', 'side3'])]
+    rows = {row.commit_oid: row for row in build_graph(commits).rows}
+    row = rows['mid']
+    prev_row = rows['top']
+    assert len(row.edges_to_parent) > 3
+
+    model = QtGui.QStandardItemModel(1, 1)
+    item = model.item(0, 0) or QtGui.QStandardItem()
+    model.setItem(0, 0, item)
+    item.setData(row, GRAPH_ROW_ROLE)
+    item.setData(prev_row, GRAPH_PREV_ROW_ROLE)
+    delegate = GraphDelegate()
+    option = QtWidgets.QStyleOptionViewItem()
+    option.rect = QtCore.QRect(0, 0, 200, 24)
+    image = QtGui.QImage(200, 24, QtGui.QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QtGui.QPainter(image)
+    delegate.paint(painter, option, model.index(0, 0))
+    painter.end()
+
+    lane = GraphDelegate.LANE_WIDTH
+    colors = EdgeColor.colors
+    checked = 0
+    for edge in prev_row.edges_to_parent:
+        if edge.to_column == row.commit_column:
+            continue  # The commit's dot covers the end of this one.
+        x_val = edge.to_column * lane + lane // 2
+        expected = QtGui.QColor(colors[edge.color_index % len(colors)])
+        actual = image.pixelColor(x_val, 3)
+        assert actual.hue() == expected.hue(), (edge, actual.name(), expected.name())
+        checked += 1
+    for edge in row.edges_to_parent:
+        if edge.from_column != edge.to_column or edge.from_column == row.commit_column:
+            continue
+        x_val = edge.from_column * lane + lane // 2
+        expected = QtGui.QColor(colors[edge.color_index % len(colors)])
+        assert image.pixelColor(x_val, 21).hue() == expected.hue()
+        checked += 1
+    assert checked >= 4
