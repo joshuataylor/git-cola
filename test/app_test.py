@@ -377,3 +377,10 @@ def test_darwin_launcher_puts_package_managers_before_the_system_path(tmp_path):
     for candidate in ('/opt/homebrew/bin', '/usr/local/bin'):
         if os.path.isdir(candidate):
             assert path.index(candidate) < system
+
+
+def test_darwin_plist_names_its_document_type_and_has_no_nib():
+    """LaunchServices wants a type name; Qt never loads a main nib"""
+    plist = _load_darwin_plist()
+    assert plist['CFBundleDocumentTypes'][0]['CFBundleTypeName'] == 'Folder'
+    assert 'NSMainNibFile' not in plist
