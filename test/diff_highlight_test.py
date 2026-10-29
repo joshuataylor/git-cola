@@ -165,3 +165,72 @@ def test_added_lines_mark_only_their_trailing_whitespace(qapp, app_context):
     assert _bad_whitespace_start(app_context, padded + ' \t ') == len(padded)
     assert _bad_whitespace_start(app_context, '+text') is None
     assert _bad_whitespace_start(app_context, '+text ') == len('+text')
+
+
+class _HeldRunTask:
+    """Hold started tasks until the test finishes them"""
+
+    def __init__(self):
+        self.started = []
+
+    def start(self, task, result=None):
+        self.started.append((task, result))
+
+    def finish(self, index=0):
+        task, result = self.started.pop(index)
+        result(task.task())
+
+
+def _deferring_edit(app_context, monkeypatch):
+    from cola.widgets import diff as diff_module
+
+    monkeypatch.setattr(diff_module, 'INTRALINE_DIFF_SYNC_CHARS', 0)
+    edit, calls = _diff_text_edit(app_context)
+    edit._intraline_runtask = _HeldRunTask()
+    return edit, calls
+
+
+def test_large_diffs_show_at_once_and_get_their_spans_later(
+    qapp, app_context, monkeypatch
+):
+    edit, calls = _deferring_edit(app_context, monkeypatch)
+    edit.set_diff(_DIFF)
+    assert edit.toPlainText() == _DIFF.rstrip('\n')
+    assert edit.highlighter._intraline_spans == {}
+    assert edit._intraline_timer.isActive()
+
+    edit._intraline_timer.stop()
+    edit._start_deferred_intraline()  # The timer firing.
+    edit._intraline_runtask.finish()
+    assert edit.highlighter._intraline_spans
+    assert calls == [1]  # One rehighlight applies them.
+
+
+def test_deferred_spans_for_a_replaced_diff_are_dropped(qapp, app_context, monkeypatch):
+    edit, calls = _deferring_edit(app_context, monkeypatch)
+    edit.set_diff(_DIFF)
+    edit._start_deferred_intraline()
+    edit.set_diff(_DIFF.replace('0.15', '0.20'))
+    edit._intraline_runtask.finish()  # The first diff's result.
+    assert edit.highlighter._intraline_spans == {}
+    assert calls == []
+
+
+def test_changing_the_preset_cancels_a_pending_deferred_compute(
+    qapp, app_context, monkeypatch
+):
+    edit, _calls = _deferring_edit(app_context, monkeypatch)
+    edit.set_diff(_DIFF)
+    edit._start_deferred_intraline()
+    edit.set_intraline_diff_preset('line_only')
+    assert not edit._intraline_timer.isActive()
+    edit._intraline_runtask.finish()  # Computed with the old preset.
+    assert edit.highlighter._intraline_spans == {}
+
+
+def test_small_diffs_still_get_their_spans_in_the_first_pass(qapp, app_context):
+    edit, calls = _diff_text_edit(app_context)
+    edit.set_diff(_DIFF)
+    assert edit.highlighter._intraline_spans
+    assert not edit._intraline_timer.isActive()
+    assert calls == []
