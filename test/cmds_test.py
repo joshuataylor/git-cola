@@ -463,3 +463,14 @@ def test_launch_terminal_on_macos_without_config(monkeypatch):
     assert cmds.LaunchTerminal.is_available(context)
     assert cmds.LaunchTerminal(context, '/repo').do()
     assert forked == [['open', '-a', 'Terminal', '/repo']]
+
+
+@pytest.mark.parametrize('editor', ['code', 'cursor'])
+def test_edit_passes_goto_as_two_arguments(monkeypatch, editor):
+    """VS Code and Cursor take "--goto" and "file:line" as separate arguments"""
+    forked = []
+    monkeypatch.setattr(cmds.core, 'fork', lambda argv, **kwargs: forked.append(argv))
+    monkeypatch.setattr(cmds.prefs, 'editor', lambda context: editor)
+    context = Mock()
+    cmds.Edit(context, ['a.py', 'b.py'], line_number=12).do()
+    assert forked == [[editor, '--goto', 'a.py:12', 'b.py']]
