@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import NamedTuple
 from typing import cast
 
 from . import core
@@ -976,58 +977,294 @@ def worktree_state(
     :rtype: dict, keys are staged, unstaged, untracked, unmerged,
             changed_upstream, and submodule.
 
-    The git commands only read, apart from the index refresh, so they run
-    concurrently. Starting a git process dominates their cost (about 6 ms
-    each on macOS), so this takes two process lifetimes rather than six.
+    The worktree is read with one "git status" where possible (see
+    `status_files()`), and the upstream changes are read alongside it.
+    Starting a git process dominates the cost in a small repository (about
+    6 ms each on macOS).
     """
     # GitConfig reloads lazily without locking, so read it before the workers start.
     if tracked is _RESOLVE:
         upstream_branch = tracked_branch(context)
     else:
         upstream_branch = cast('str | None', tracked)
+    ignore_submodules = _ignore_submodules(context)
     with ThreadPoolExecutor(max_workers=4) as pool:
         # Look for upstream modified files if this is a tracking branch.
         upstream = pool.submit(_diff_tracked, context, head, upstream_branch)
-        # The untracked walk is the slowest call in a large worktree and does
-        # not use the index's stat data, so it overlaps the refresh. git
-        # replaces the index by renaming a lock file over it, so a concurrent
-        # reader sees either the old or the new index.
-        if display_untracked:
-            untracked_job = pool.submit(untracked_files, context, paths=paths)
-        else:
-            untracked_job = None
-        if update_index:
-            context.git.update_index(refresh=True)
-        index = pool.submit(diff_index, context, head, paths=paths)
-        worktree = pool.submit(diff_worktree, context, paths)
-
-    staged, unmerged, staged_deleted, staged_submods = index.result()
-    modified, unstaged_deleted, modified_submods = worktree.result()
-    untracked = untracked_job.result() if untracked_job is not None else []
+        files = None
+        if head == 'HEAD':
+            files = status_files(
+                context, update_index, display_untracked, paths, ignore_submodules
+            )
+        if files is None:
+            files = diff_files_state(
+                context,
+                head,
+                update_index,
+                display_untracked,
+                paths,
+                ignore_submodules,
+                pool=pool,
+            )
     upstream_changed = upstream.result()
+    upstream_changed.sort()
+    return {
+        'staged': files.staged,
+        'modified': files.modified,
+        'unmerged': files.unmerged,
+        'untracked': files.untracked,
+        'upstream_changed': upstream_changed,
+        'staged_deleted': files.staged_deleted,
+        'unstaged_deleted': files.unstaged_deleted,
+        'submodules': files.submodules,
+    }
 
-    # Remove unmerged paths from the modified list
+
+class WorktreeFiles(NamedTuple):
+    """The paths in each state, as read by `worktree_state()`"""
+
+    staged: list[str]
+    modified: list[str]
+    unmerged: list[str]
+    untracked: list[str]
+    staged_deleted: set[str]
+    unstaged_deleted: set[str]
+    submodules: set[str]
+
+
+def _worktree_files(
+    staged, modified, unmerged, untracked, staged_deleted, unstaged_deleted, submodules
+) -> WorktreeFiles:
+    """Sort the lists, and leave unmerged paths out of the modified list"""
     if unmerged:
         unmerged_set = set(unmerged)
         modified = [path for path in modified if path not in unmerged_set]
-
-    # Keep stuff sorted
     staged.sort()
     modified.sort()
     unmerged.sort()
     untracked.sort()
-    upstream_changed.sort()
+    return WorktreeFiles(
+        staged,
+        modified,
+        unmerged,
+        untracked,
+        staged_deleted,
+        unstaged_deleted,
+        submodules,
+    )
 
-    return {
-        'staged': staged,
-        'modified': modified,
-        'unmerged': unmerged,
-        'untracked': untracked,
-        'upstream_changed': upstream_changed,
-        'staged_deleted': staged_deleted,
-        'unstaged_deleted': unstaged_deleted,
-        'submodules': staged_submods | modified_submods,
-    }
+
+def _ignore_submodules(context: ApplicationContext) -> bool:
+    """Leave submodules out of the modified list?"""
+    value = context.cfg.get('diff.ignoresubmodules', 'none')
+    return value in {'all', 'dirty', 'untracked'}
+
+
+def diff_files_state(
+    context: ApplicationContext,
+    head: str,
+    update_index: bool,
+    display_untracked: bool,
+    paths: list[str] | None,
+    ignore_submodules: bool,
+    pool: ThreadPoolExecutor | None = None,
+) -> WorktreeFiles:
+    """Read the worktree with diff-index, diff-files and ls-files
+
+    This compares the index against any `head`, e.g. HEAD^ when amending.
+    The commands only read, apart from the index refresh, so they run
+    concurrently on `pool` when one is given.
+    """
+    if pool is None:
+        with ThreadPoolExecutor(max_workers=3) as own_pool:
+            return diff_files_state(
+                context,
+                head,
+                update_index,
+                display_untracked,
+                paths,
+                ignore_submodules,
+                pool=own_pool,
+            )
+    # The untracked walk is the slowest call in a large worktree and does
+    # not use the index's stat data, so it overlaps the refresh. git
+    # replaces the index by renaming a lock file over it, so a concurrent
+    # reader sees either the old or the new index.
+    if display_untracked:
+        untracked_job = pool.submit(untracked_files, context, paths=paths)
+    else:
+        untracked_job = None
+    if update_index:
+        context.git.update_index(refresh=True)
+    index = pool.submit(diff_index, context, head, paths=paths)
+    worktree = pool.submit(
+        diff_worktree, context, paths, ignore_submodules=ignore_submodules
+    )
+    staged, unmerged, staged_deleted, staged_submods = index.result()
+    modified, unstaged_deleted, modified_submods = worktree.result()
+    untracked = untracked_job.result() if untracked_job is not None else []
+    return _worktree_files(
+        staged,
+        modified,
+        unmerged,
+        untracked,
+        staged_deleted,
+        unstaged_deleted,
+        staged_submods | modified_submods,
+    )
+
+
+def status_files(
+    context: ApplicationContext,
+    update_index: bool,
+    display_untracked: bool,
+    paths: list[str] | None,
+    ignore_submodules: bool,
+) -> WorktreeFiles | None:
+    """Read the worktree against HEAD with a single "git status"
+
+    One status does the index refresh (with threaded preloading), both
+    diffs and the untracked walk, which can use the untracked cache. A
+    standalone "ls-files --others" never does, and takes seconds in a very
+    large worktree. Untracked directories are collapsed to "dir/" so that
+    the cache applies, then only those are listed with ls-files. That keeps
+    the result identical to `diff_files_state()`.
+
+    Returns None when status fails, so the caller can fall back.
+    """
+    args = ['--']
+    if paths:
+        args.extend(paths)
+    # An index refresh (update_index) is written back, along with the
+    # untracked cache. GIT_OPTIONAL_LOCKS=0 is set for every other command.
+    add_env = {'GIT_OPTIONAL_LOCKS': '1'} if update_index else None
+    status, out, _ = context.git.status(
+        porcelain='v2',
+        z=True,
+        no_renames=True,
+        # Like diff-files, report every submodule and filter them here.
+        ignore_submodules='none',
+        untracked_files='normal' if display_untracked else 'no',
+        _add_env=add_env,
+        _readonly=not update_index,
+        *args,
+    )
+    if status != 0:
+        return None
+    staged = []
+    modified = []
+    unmerged = []
+    untracked = []
+    untracked_dirs = []
+    staged_deleted = set()
+    unstaged_deleted = set()
+    submodules = set()
+    fields = out.split('\0')
+    index = 0
+    while index < len(fields):
+        record = fields[index]
+        index += 1
+        kind = record[:1]
+        if kind == '1':
+            # 1 XY sub mH mI mW hH hI path
+            parts = record.split(' ', 8)
+            if len(parts) != 9:
+                return None
+            _parse_status_entry(
+                parts[1],
+                parts[2],
+                parts[8],
+                staged,
+                modified,
+                staged_deleted,
+                unstaged_deleted,
+                submodules,
+                ignore_submodules,
+            )
+        elif kind == '2':
+            # Renames are disabled, but skip the original path if one appears.
+            parts = record.split(' ', 9)
+            if len(parts) != 10:
+                return None
+            index += 1
+            _parse_status_entry(
+                parts[1],
+                parts[2],
+                parts[9],
+                staged,
+                modified,
+                staged_deleted,
+                unstaged_deleted,
+                submodules,
+                ignore_submodules,
+            )
+        elif kind == 'u':
+            # u XY sub m1 m2 m3 mW h1 h2 h3 path
+            parts = record.split(' ', 10)
+            if len(parts) != 11:
+                return None
+            path = parts[10]
+            unmerged.append(path)
+            if parts[2].startswith('S'):
+                submodules.add(path)
+        elif kind == '?':
+            path = record[2:]
+            if path.endswith('/'):
+                untracked_dirs.append(path)
+            else:
+                untracked.append(path)
+    if untracked_dirs:
+        if paths:
+            # Expanding only the collapsed directories could escape the
+            # pathspec, so list everything under it the old way.
+            untracked = untracked_files(context, paths=paths)
+        else:
+            literal = [':(literal)' + path for path in untracked_dirs]
+            untracked.extend(untracked_files(context, paths=literal))
+    return _worktree_files(
+        staged,
+        modified,
+        unmerged,
+        untracked,
+        staged_deleted,
+        unstaged_deleted,
+        submodules,
+    )
+
+
+def _parse_status_entry(
+    xy: str,
+    sub: str,
+    path: str,
+    staged: list[str],
+    modified: list[str],
+    staged_deleted: set[str],
+    unstaged_deleted: set[str],
+    submodules: set[str],
+    ignore_submodules: bool,
+) -> None:
+    """Sort one "git status --porcelain=v2" changed entry into the lists
+
+    The lists match diff-index and diff-files. An intent-to-add path (".A")
+    counts as staged too, as diff-index reports it. A submodule with only
+    untracked content ("S..U") is unchanged, as diff-files reports it.
+    """
+    index_status, worktree_status = xy[0], xy[1]
+    is_submodule = sub.startswith('S')
+    index_changed = index_status in 'DAMT' or worktree_status == 'A'
+    worktree_changed = worktree_status in 'DAMT'
+    if is_submodule and worktree_changed:
+        worktree_changed = sub[1] == 'C' or sub[2] == 'M'
+    if is_submodule and (index_changed or worktree_changed):
+        submodules.add(path)
+    if index_changed:
+        staged.append(path)
+        if index_status == 'D':
+            staged_deleted.add(path)
+    if worktree_changed and not (is_submodule and ignore_submodules):
+        modified.append(path)
+        if worktree_status == 'D':
+            unstaged_deleted.add(path)
 
 
 def _parse_raw_diff(out: TextType) -> Iterator[tuple[str, str, bool]]:
@@ -1087,14 +1324,16 @@ def diff_index(
 
 
 def diff_worktree(
-    context: ApplicationContext, paths: list[Any] | None = None
+    context: ApplicationContext,
+    paths: list[Any] | None = None,
+    ignore_submodules: bool | None = None,
 ) -> (
     tuple[list[str], set[str], set[Any]]
     | tuple[list[str], set[Any], set[Any]]
     | tuple[list[Any], set[Any], set[Any]]
 ):
-    ignore_submodules_value = context.cfg.get('diff.ignoresubmodules', 'none')
-    ignore_submodules = ignore_submodules_value in {'all', 'dirty', 'untracked'}
+    if ignore_submodules is None:
+        ignore_submodules = _ignore_submodules(context)
     modified = []
     deleted = set()
     submodules = set()
