@@ -554,3 +554,25 @@ def test_build_graph_matches_reference_on_random_dags():
         head = rng.choice(oids) if oids and rng.random() < 0.5 else None
         result = build_graph(commits, head_oid=head)
         assert _actual_graph(result) == _reference_graph(commits, head_oid=head)
+
+
+def test_rows_share_unchanged_lane_snapshots():
+    """A long side branch passes many rows without a segment object per row"""
+    # base <- side, and base <- m1 <- m2 <- m3 <- merge(m3, side)
+    commits = [
+        ('base', []),
+        ('side', ['base']),
+        ('m1', ['base']),
+        ('m2', ['m1']),
+        ('m3', ['m2']),
+        ('merge', ['m3', 'side']),
+    ]
+    result = build_graph(commits)
+    by_oid = {row.commit_oid: row for row in result.rows}
+    # m3, m2 and m1 all pass the side branch's lane with the same colors.
+    assert by_oid['m3'].lane_colors is by_oid['m2'].lane_colors
+    assert by_oid['m2'].lane_colors is by_oid['m1'].lane_colors
+    # The segments are built on first use and then reused.
+    edges = by_oid['m2'].edges_to_parent
+    assert edges is by_oid['m2'].edges_to_parent
+    assert [(e.from_column, e.to_column) for e in edges] == [(1, 1), (0, 0)]
