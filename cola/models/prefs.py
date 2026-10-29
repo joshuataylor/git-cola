@@ -726,7 +726,7 @@ class SetConfig(Command):
 
     def do(self) -> None:
         """Modify the model and store the updated configuration"""
-        self.old_value = self.model.get_config(self.source, self.config)
+        self.old_value = self.prefs_model.get_config(self.source, self.config)
         self.prefs_model.set_config(self.source, self.config, self.value)
 
     def undo(self) -> None:

@@ -74,3 +74,42 @@ def test_background_editor_setting_wins(monkeypatch):
     monkeypatch.setattr(prefs.core, 'IS_DARWIN', True)
     context = _context({prefs.BACKGROUND_EDITOR: 'code'})
     assert prefs.background_editor(context) == 'code'
+
+
+def _config_context(repo, user):
+    """A context whose cfg reads and writes the given repo/user dicts"""
+    context = Mock()
+    context.timestamp = 0
+    # Command sets self.model to the MainModel, which has no get_config().
+    context.model = Mock(spec=[])
+    context.cfg.get_repo.side_effect = repo.get
+    context.cfg.set_repo.side_effect = repo.__setitem__
+    context.cfg.get.side_effect = lambda key, default=None: user.get(
+        key, repo.get(key, default)
+    )
+    context.cfg.set_user.side_effect = user.__setitem__
+    return context
+
+
+def test_set_config_local_records_the_old_value_and_undoes():
+    repo = {prefs.MERGE_SUMMARY: True}
+    context = _config_context(repo, {})
+    model = prefs.PreferencesModel(context)
+    cmd = prefs.SetConfig(context, model, 'local', prefs.MERGE_SUMMARY, False)
+    cmd.do()
+    assert cmd.old_value is True
+    assert repo[prefs.MERGE_SUMMARY] is False
+    cmd.undo()
+    assert repo[prefs.MERGE_SUMMARY] is True
+
+
+def test_set_config_global_records_the_old_value_and_undoes():
+    user = {prefs.TABWIDTH: 8}
+    context = _config_context({}, user)
+    model = prefs.PreferencesModel(context)
+    cmd = prefs.SetConfig(context, model, 'global', prefs.TABWIDTH, 4)
+    cmd.do()
+    assert cmd.old_value == 8
+    assert user[prefs.TABWIDTH] == 4
+    cmd.undo()
+    assert user[prefs.TABWIDTH] == 8
