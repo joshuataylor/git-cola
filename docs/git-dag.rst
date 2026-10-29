@@ -92,6 +92,9 @@ SHORTCUTS
 You can run commands using dedicated shortcuts. Select a single commit
 and then press `Ctrl-Alt-c` to copy sha1 or `Ctrl-d` to run diff tool.
 
+`Home` and `End` select the first and last commit in the commit list.
+On macOS `Cmd-Up` and `Cmd-Down` do the same.
+
 You can read more about hotkeys from 'keyboard shortcuts' window or context menu.
 
 
