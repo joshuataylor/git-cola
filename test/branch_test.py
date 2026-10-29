@@ -313,3 +313,59 @@ def _create_item(name, refname, expanded):
     item = branch.BranchTreeWidgetItem(name, branch.ItemType.REF_NAME, refname=refname)
     item.isExpanded = Mock(return_value=expanded)
     return item
+
+
+def _branches_tree(local, remote=(), tags=(), current='main'):
+    """A BranchesTreeWidget over a fake model, as if it were on screen"""
+    import sys
+
+    from qtpy import QtWidgets
+
+    if QtWidgets.QApplication.instance() is None:
+        _branches_tree.app = QtWidgets.QApplication(sys.argv[:1])
+    context = Mock()
+    context.model.local_branches = list(local)
+    context.model.remote_branches = list(remote)
+    context.model.tags = list(tags)
+    context.model.currentbranch = current
+    tree = branch.BranchesTreeWidget(context)
+    tree.runtask = Mock()
+    tree._visible = True
+    return tree
+
+
+def test_refresh_keeps_an_unchanged_tree():
+    """Every model update refreshes, so unchanged refs reuse the items"""
+    tree = _branches_tree(['main', 'topic'], ['origin/main'], ['v1.0'])
+    tree.refresh()
+    local = tree.topLevelItem(0)
+    assert local.childCount() == 2
+    tree._branch_details_in_progress = False  # The first task "finished".
+    tree.refresh()
+    assert tree.topLevelItem(0) is local
+    # The branch details are still refreshed.
+    assert tree.runtask.start.call_count == 2
+
+    tree.context.model.local_branches.append('another')
+    tree.refresh()
+    assert tree.topLevelItem(0) is not local
+    assert tree.topLevelItem(0).childCount() == 3
+
+    local = tree.topLevelItem(0)
+    tree.set_name_filter('top')
+    assert tree.topLevelItem(0) is not local
+
+
+def test_branch_counts_replace_the_previous_ones():
+    """A kept tree must not collect one ahead/behind suffix per refresh"""
+    tree = _branches_tree(['main'])
+    tree.refresh()
+    task = Mock()
+    task.result = ('main', 'origin/main', 2, 0)
+    tree._update_branches_finished(task)
+    tree._update_branches_finished(task)
+    item = branch.find_by_refname(tree.topLevelItem(0), 'main')
+    assert item.text(0) == 'main\t↑2'
+    task.result = ('main', 'origin/main', 0, 0)
+    tree._update_branches_finished(task)
+    assert item.text(0) == 'main'
