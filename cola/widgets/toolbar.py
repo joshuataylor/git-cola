@@ -1,5 +1,6 @@
 from functools import partial
 
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
@@ -137,7 +138,11 @@ class ToolBarState:
             # floating toolbars must be set after added
             if data['float']:
                 toolbar.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
-                toolbar.move(data['x'], data['y'])
+                position = QtCore.QPoint(data['x'], data['y'])
+                # The display it was saved on may be gone. Leave it where Qt
+                # puts it rather than off-screen.
+                if QtGui.QGuiApplication.screenAt(position) is not None:
+                    toolbar.move(position)
 
     def export_state(self):
         result = []
@@ -197,6 +202,7 @@ class ToolBar(QtWidgets.QToolBar):
 
     def __init__(self, context, title, tree_layout, toolbar_commands):
         QtWidgets.QToolBar.__init__(self)
+        qtutils.keep_tool_window_visible(self)
         self.setWindowTitle(title)
         self.setObjectName(title)
         self.setToolButtonStyle(Qt.ToolButtonFollowStyle)
