@@ -3299,38 +3299,29 @@ class Edge(QtWidgets.QGraphicsItem):
         self.path_valid = False
 
         # Choose a new color for new branch edges
-        if self.source.x() < self.dest.x():
+        if source.x() < dest.x():
             color = EdgeColor.cycle()
-            line = Qt.SolidLine
-        elif self.source.x() != self.dest.x():
-            color = EdgeColor.current()
-            line = Qt.SolidLine
         else:
             color = EdgeColor.current()
-            line = Qt.SolidLine
 
         # Remembered so refresh_color() can follow a Light/Dark switch.
         self.color_index = EdgeColor.current_color_index
-        self.pen = QtGui.QPen(color, 2.0, line, Qt.SquareCap, Qt.RoundJoin)
+        self.pen = EdgeColor.pen(color)
 
     def refresh_color(self):
-        """Re-pick this edge's color from the current EdgeColor set"""
+        """Re-pick this edge's color from the current EdgeColor set
+
+        Edges of one color share a pen, so this recolors all of them.
+        """
         color = QtGui.QColor(EdgeColor.colors[self.color_index % len(EdgeColor.colors)])
         color.setAlpha(self.pen.color().alpha())
         self.pen.setColor(color)
         self.update()
 
     def recompute_bound(self):
-        dest_pt = Commit.item_bbox.center()
-
-        self.source_pt = self.mapFromItem(self.source, dest_pt)
-        self.dest_pt = self.mapFromItem(self.dest, dest_pt)
-        self.line = QtCore.QLineF(self.source_pt, self.dest_pt)
-
-        width = self.dest_pt.x() - self.source_pt.x()
-        height = self.dest_pt.y() - self.source_pt.y()
-        rect = QtCore.QRectF(self.source_pt, QtCore.QSizeF(width, height))
-        self.bound = rect.normalized()
+        # Commit shapes are centred on the commit's position and edges have no
+        # parent or transform, so the end points are the commits' positions.
+        self.bound = QtCore.QRectF(self.source.pos(), self.dest.pos()).normalized()
 
     def commits_were_invalidated(self):
         self.recompute_bound()
@@ -3419,6 +3410,9 @@ class EdgeColor:
 
     current_color_index = 0
     colors = _edge_base_colors()
+    # Edges share one pen per color, so a large graph builds a few pens
+    # rather than one per edge.
+    _pens = {}
 
     @classmethod
     def update_colors(cls, dark):
@@ -3446,6 +3440,18 @@ class EdgeColor:
                 QtGui.QColor(Qt.darkBlue),
             ]
         cls.colors = _edge_base_colors() + extra
+        # Existing edges keep their pens, which refresh_color() recolors.
+        cls._pens = {}
+
+    @classmethod
+    def pen(cls, color):
+        """Return the shared edge pen for a color"""
+        key = color.rgba()
+        pen = cls._pens.get(key)
+        if pen is None:
+            pen = QtGui.QPen(color, 2.0, Qt.SolidLine, Qt.SquareCap, Qt.RoundJoin)
+            cls._pens[key] = pen
+        return pen
 
     @classmethod
     def cycle(cls):

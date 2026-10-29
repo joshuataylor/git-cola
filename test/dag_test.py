@@ -824,6 +824,19 @@ def test_graph_node_colours_follow_selection_and_appearance(qapp, app_context):
         GraphicsCommit.commit_selected_color = original
 
 
+def test_edges_of_one_colour_share_a_pen():
+    from cola.widgets.dag import EdgeColor
+
+    EdgeColor.update_colors(dark=False)
+    red = QtGui.QColor(Qt.red)
+    assert EdgeColor.pen(red) is EdgeColor.pen(QtGui.QColor(Qt.red))
+    assert EdgeColor.pen(red) is not EdgeColor.pen(QtGui.QColor(Qt.cyan))
+    pen = EdgeColor.pen(red)
+    EdgeColor.update_colors(dark=True)
+    # New edges after an appearance change never reuse a recoloured pen.
+    assert EdgeColor.pen(red) is not pen
+
+
 def test_model_updated_debounces_display(qapp, app_context):
     """A burst of model updates coalesces into a single display() pass"""
     win = GitDAG.__new__(GitDAG)
