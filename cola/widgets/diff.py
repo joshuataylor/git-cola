@@ -132,6 +132,14 @@ class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
         """
         self._intraline_spans = {}
 
+    def preset_intraline_spans(self, spans):
+        """Set the spans for a document about to be set, without re-highlighting
+
+        The following setPlainText highlights every block once with these
+        spans, instead of a plain pass followed by a full rehighlight.
+        """
+        self._intraline_spans = spans or {}
+
     def set_intraline_spans(self, spans):
         """Set the per-line spans used for intra-line diff highlighting."""
         spans = spans or {}
@@ -401,20 +409,18 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         # Recover from a prior ANSI render (set_ansi_diff disables these).
         self.highlighter.set_enabled(True)
-        # Drop the previous diff's intra-line spans before the new document is
-        # set, so setPlainText's highlight pass starts clean. update_intraline_
-        # diff_spans() below then re-highlights only when the new diff actually
-        # has spans, instead of every diff paying for a second full pass.
-        self.highlighter.clear_intraline_spans()
 
         lines = self.diff_lines.parse(diff)
         if self.numbers:
             # The diff_lines parser is shared with self.numbers and updated above.
             self.numbers.set_diff(diff, lines=lines)
 
-        self.set_value(diff)
+        # Compute the intra-line spans before the document is set, so that
+        # setPlainText's highlight pass applies them in one go. Setting them
+        # afterwards meant a second full-document rehighlight.
         self._current_diff_text = diff
-        self.update_intraline_diff_spans()
+        self.highlighter.preset_intraline_spans(self._compute_intraline_spans())
+        self.set_value(diff)
 
         self.restore_scrollbar()
 
@@ -476,22 +482,24 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     # vvv inline-diff highlight begin vvv
     def update_intraline_diff_spans(self) -> None:
         """(Re)compute and apply intra-line spans for the current diff text."""
+        self.highlighter.set_intraline_spans(self._compute_intraline_spans())
+
+    def _compute_intraline_spans(self) -> intraline_diff.SpansByLineIndex:
+        """Return the intra-line spans for the current diff text, or {}"""
         if not self._should_enable_intraline_diff():
-            self.highlighter.set_intraline_spans({})
-            return
+            return {}
 
         diff_text = self._current_diff_text
         intraline_cfg = self._build_intraline_diff_config()
         if intraline_cfg is None:
-            self.highlighter.set_intraline_spans({})
-            return
+            return {}
 
         intraline_spans, compute_ms, result = self._try_compute_intraline_spans(
             diff_text,
             intraline_cfg,
         )
         self._log_intraline_diff_compute_result(diff_text, compute_ms, result)
-        self.highlighter.set_intraline_spans(intraline_spans)
+        return intraline_spans
 
     def _should_enable_intraline_diff(self) -> bool:
         """Return True when intra-line diff highlighting should be computed."""
