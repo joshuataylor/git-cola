@@ -90,6 +90,20 @@ def _mock_core_git_log(core, text, status=0):
     core.wait.return_value = status
 
 
+def _read_log_text(core, dag_context):
+    """Read LOG_TEXT through the RepoReader, failing if it reads nothing
+
+    The repository needs a commit first: the reader treats a fresh "git init"
+    as an empty history, and a loop over nothing would assert nothing.
+    """
+    commit_files()
+    dag_context.context.model.update_status()
+    _mock_core_git_log(core, LOG_TEXT)
+    commits = list(dag_context.reader.get())
+    assert len(commits) == len(LOG_LINES)
+    return commits
+
+
 @patch('cola.models.dag.core')
 def test_repo_reader(core, dag_context):
     commit_files()
@@ -114,8 +128,7 @@ def test_repo_reader_order(core, dag_context):
         'f4fb8fd5baaa55d9b41faca79be289bb4407281e',
         '23e7eab4ba2c94e3155f5d261c693ccac1342eb9',
     ]
-    _mock_core_git_log(core, LOG_TEXT)
-    for idx, commit in enumerate(dag_context.reader.get()):
+    for idx, commit in enumerate(_read_log_text(core, dag_context)):
         assert commits[idx] == commit.oid
 
 
@@ -130,8 +143,7 @@ def test_repo_reader_parents(core, dag_context):
         ['e3f5a2d0248de6197d6e0e63c901810b8a9af2f8'],
         ['f4fb8fd5baaa55d9b41faca79be289bb4407281e'],
     ]
-    _mock_core_git_log(core, LOG_TEXT)
-    for idx, commit in enumerate(dag_context.reader.get()):
+    for idx, commit in enumerate(_read_log_text(core, dag_context)):
         assert parents[idx] == [p.oid for p in commit.parents]
 
 
@@ -147,8 +159,7 @@ def test_repo_reader_timestamps(core, dag_context):
         1196766896,
         1196996360,
     ]
-    _mock_core_git_log(core, LOG_TEXT)
-    for idx, commit in enumerate(dag_context.reader.get()):
+    for idx, commit in enumerate(_read_log_text(core, dag_context)):
         assert timestamps[idx] == commit.timestamp
         assert commit.authdate.endswith('2007 -0800')
 
