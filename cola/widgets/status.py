@@ -450,12 +450,26 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         # refresh which results in the same exact path state.
         did_reselect = False
 
-        with qtutils.BlockSignals(self):
-            for new, old, sel, reselect in saved_selection:
-                for item in sel:
-                    if item in new:
-                        reselect(item, current=False)
-                        did_reselect = True
+        # Look the rows up in a dict and select runs of rows as one range in
+        # a single call. Selecting path by path searched the whole list and
+        # merged one row at a time, which took 27 s for 15k selected files.
+        new_lists = (new_c.staged, new_c.unmerged, new_c.modified, new_c.untracked)
+        selection = QtCore.QItemSelection()
+        for category, (new, _old, sel, _reselect) in enumerate(saved_selection):
+            kept = sel & new
+            if not kept:
+                continue
+            did_reselect = True
+            row_of = {}
+            for row, path in enumerate(new_lists[category]):
+                row_of.setdefault(path, row)
+            self._add_row_ranges(selection, category, sorted(row_of[p] for p in kept))
+        if not selection.isEmpty():
+            with qtutils.BlockSignals(self):
+                self.selectionModel().select(
+                    selection,
+                    QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows,
+                )
 
         # The status widget is used to interactively work your way down the
         # list of Staged, Unmerged, Modified and Untracked items and perform
@@ -583,6 +597,29 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
     def _subtree_item(self, idx, itemidx):
         parent = self.topLevelItem(idx)
         return parent.child(itemidx)
+
+    def _add_row_ranges(self, selection, category, rows):
+        """Add sorted child rows of a category to a selection, runs as ranges"""
+        parent = self.topLevelItem(category)
+        count = parent.childCount()
+        start = end = None
+        for row in rows:
+            if row >= count:
+                break
+            if start is not None and row == end + 1:
+                end = row
+                continue
+            if start is not None:
+                selection.select(
+                    self.indexFromItem(parent.child(start)),
+                    self.indexFromItem(parent.child(end)),
+                )
+            start = end = row
+        if start is not None:
+            selection.select(
+                self.indexFromItem(parent.child(start)),
+                self.indexFromItem(parent.child(end)),
+            )
 
     def _set_previous_contents(self, staged, unmerged, modified, untracked):
         """Callback triggered right before the model changes its contents"""
@@ -1380,16 +1417,27 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
                 break
         if first is None:
             return
+        # One range per category, applied in a single call. Selecting the
+        # files one by one merges each into the selection model's ranges,
+        # which is quadratic: 40 s for 18k files.
+        selection = QtCore.QItemSelection()
+        for top_idx in categories:
+            parent = self.topLevelItem(top_idx)
+            if parent is not None and parent.childCount() > 0:
+                selection.select(
+                    self.indexFromItem(parent.child(0)),
+                    self.indexFromItem(parent.child(parent.childCount() - 1)),
+                )
+        selection_model = self.selectionModel()
         with qtutils.BlockSignals(self):
-            # setCurrentItem() clears+selects the first file; the loop then adds
-            # the rest, leaving every file selected and the first file current.
-            self.setCurrentItem(first)
-            for top_idx in categories:
-                parent = self.topLevelItem(top_idx)
-                if parent is None:
-                    continue
-                for i in range(parent.childCount()):
-                    parent.child(i).setSelected(True)
+            selection_model.setCurrentIndex(
+                self.indexFromItem(first), QtCore.QItemSelectionModel.NoUpdate
+            )
+            selection_model.select(
+                selection,
+                QtCore.QItemSelectionModel.ClearAndSelect
+                | QtCore.QItemSelectionModel.Rows,
+            )
         self.show_selection()
 
     def move_up(self):
