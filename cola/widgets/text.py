@@ -912,6 +912,11 @@ class TextEditCursorPosition:
 
     def emit(self):
         widget = self._widget
+        # Finding the row copies the whole document, so skip it when nothing
+        # shows the position: only the commit message editor does, while the
+        # console log moves its cursor for every line it appends.
+        if not widget.receivers(widget.cursor_changed):
+            return
         ext = self._ext
         cursor = widget.textCursor()
         position = cursor.position()
