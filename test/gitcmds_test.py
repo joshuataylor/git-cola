@@ -97,6 +97,46 @@ def test_untracked_files(app_context):
     assert gitcmds.untracked_files(app_context) == ['C', 'D', 'E']
 
 
+def test_worktree_state(app_context):
+    """worktree_state() reports every category from its concurrent git calls"""
+    helper.commit_files()
+    # Upstream adds U on top of HEAD, then main goes back to the initial commit.
+    helper.touch('U')
+    helper.run_git('add', 'U')
+    helper.run_git('commit', '-m', 'upstream')
+    helper.run_git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+    helper.run_git('reset', '--hard', 'HEAD~')
+    helper.run_git('config', 'branch.main.remote', 'origin')
+    helper.run_git('config', 'branch.main.merge', 'refs/heads/main')
+    app_context.cfg.reset()
+
+    helper.write_file('A', 'modified\n')
+    os.remove('B')
+    helper.touch('C')
+    helper.run_git('add', 'C')
+    helper.touch('D')
+
+    state = gitcmds.worktree_state(app_context)
+    assert state['staged'] == ['C']
+    assert state['modified'] == ['A', 'B']
+    assert state['unstaged_deleted'] == {'B'}
+    assert state['untracked'] == ['D']
+    assert state['upstream_changed'] == ['U']
+    assert state['unmerged'] == []
+
+    state = gitcmds.worktree_state(app_context, display_untracked=False)
+    assert state['untracked'] == []
+
+
+def test_worktree_state_refreshes_the_index_before_diff_files(app_context):
+    """A stat-only change is hidden once update_index refreshes the index"""
+    helper.commit_files()
+    helper.write_file('A', '')
+    os.utime('A', (0, 0))
+    assert gitcmds.worktree_state(app_context)['modified'] == ['A']
+    assert gitcmds.worktree_state(app_context, update_index=True)['modified'] == []
+
+
 def test_all_files(app_context):
     helper.touch('other-file')
     all_files = gitcmds.all_files(app_context)
