@@ -4192,8 +4192,10 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         for oid, (x_val, y_val) in positions.items():
             item = self.items[oid]
 
+            # Compare the coordinates: a QPointF never equals a tuple, which
+            # made every node look moved.
             pos = item.pos()
-            if pos != (x_val, y_val):
+            if pos.x() != x_val or pos.y() != y_val:
                 item.setPos(x_val, y_val)
 
                 for edge in item.edges.values():

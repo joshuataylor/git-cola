@@ -1336,3 +1336,22 @@ def test_inline_graph_paints_every_lane_in_its_colour(qapp):
         assert image.pixelColor(x_val, 21).hue() == expected.hue()
         checked += 1
     assert checked >= 4
+
+
+def test_graph_layout_leaves_unmoved_nodes_and_their_edges_alone():
+    from cola.widgets.dag import GraphView
+
+    view = GraphView.__new__(GraphView)
+    still, moved = MagicMock(), MagicMock()
+    still.pos.return_value = QtCore.QPointF(10.0, 20.0)
+    moved.pos.return_value = QtCore.QPointF(0.0, 0.0)
+    still_edge, moved_edge = MagicMock(), MagicMock()
+    still.edges = {'a': still_edge}
+    moved.edges = {'b': moved_edge}
+    view.items = {'still': still, 'moved': moved}
+    view.position_nodes = lambda: {'still': (10.0, 20.0), 'moved': (30.0, 40.0)}
+    view.layout_commits()
+    still.setPos.assert_not_called()
+    still_edge.commits_were_invalidated.assert_not_called()
+    moved.setPos.assert_called_once_with(30.0, 40.0)
+    moved_edge.commits_were_invalidated.assert_called_once_with()
