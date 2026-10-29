@@ -301,24 +301,43 @@ def display_untracked(context) -> bool:
 
 def editor(context) -> str:
     """Return the configured editor"""
-    app = _config_with_override(
-        context, OVERRIDE_EDITOR, EDITOR, default=fallback_editor()
-    )
+    app = _configured_editor(context)
+    if _is_missing_default_editor(context, app):
+        # git waits for GIT_EDITOR to exit (e.g. rewording during a rebase):
+        # -W waits until the new (-n) TextEdit instance quits.
+        return 'open -W -n -t'
     return _remap_editor(app)
 
 
 def background_editor(context) -> str:
     """Return the configured non-blocking background editor"""
-    app = context.cfg.get(BACKGROUND_EDITOR, default=editor(context))
-    if (
+    app = context.cfg.get(BACKGROUND_EDITOR, default=None) or _configured_editor(
+        context
+    )
+    if _is_missing_default_editor(context, app):
+        return 'open -t'
+    return _remap_editor(app)
+
+
+def _configured_editor(context) -> str:
+    """Return the editor from git config or the environment, or the default"""
+    return _config_with_override(
+        context, OVERRIDE_EDITOR, EDITOR, default=fallback_editor()
+    )
+
+
+def _is_missing_default_editor(context, app: str) -> bool:
+    """Is this the unconfigured gvim default on a Mac without gvim?
+
+    macOS does not ship gvim, so with nothing configured "Launch Editor" and
+    rewording during a rebase failed to exec it. Open the default text
+    editor instead.
+    """
+    return (
         core.IS_DARWIN
         and app == Defaults.editor
         and not context.ops.find_executable(Defaults.editor)
-    ):
-        # Nothing configured and no gvim, which macOS does not ship. Open
-        # the file in the default text editor instead of failing to exec.
-        return 'open -t'
-    return _remap_editor(app)
+    )
 
 
 def enable_popups(context) -> bool:
