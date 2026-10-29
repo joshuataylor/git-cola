@@ -171,3 +171,22 @@ def test_desktop_rect_unchanged_elsewhere(monkeypatch):
     monkeypatch.setattr(qtutils.core, 'IS_DARWIN', False)
     _fake_app(monkeypatch, None)
     assert qtutils.desktop_rect() == QtCore.QRect(0, 0, 1920, 1080)
+
+
+def test_dialog_modality_is_a_sheet_on_macos(qapp, monkeypatch):
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
+    parent = QtWidgets.QWidget()
+    dialog = QtWidgets.QDialog(parent)
+    qtutils.set_dialog_modality(dialog)
+    assert dialog.windowModality() == Qt.WindowModal
+    orphan = QtWidgets.QDialog()
+    qtutils.set_dialog_modality(orphan)
+    assert orphan.windowModality() == Qt.ApplicationModal
+
+
+def test_dialog_modality_unchanged_elsewhere(qapp, monkeypatch):
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', False)
+    parent = QtWidgets.QWidget()
+    dialog = QtWidgets.QDialog(parent)
+    qtutils.set_dialog_modality(dialog)
+    assert dialog.windowModality() == Qt.ApplicationModal
