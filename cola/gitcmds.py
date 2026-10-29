@@ -31,6 +31,11 @@ if TYPE_CHECKING:
     from .types import TextType
 
 
+#: Paths per "git add" run when they are passed on stdin. 1000-2000 was the
+#: fastest for 15k untracked files: 1.7 s, against 2.7 s in a single run.
+ADD_CHUNK_SIZE = 1000
+
+
 def add(
     context: ApplicationContext, items: list[str], u: bool = False
 ) -> tuple[int, str, str]:
@@ -39,6 +44,26 @@ def add(
     if prefs.verbose_simple_commands(context):
         log_paths = core.list2cmdline(items)
         context.notifier.git_cmd(f'git add -- {log_paths}')
+    if (
+        items
+        and context.ops.accepts_input
+        and version.check_git(context, 'add-pathspec-from-file')
+    ):
+        # "git add" reads the paths from stdin, in chunks of ADD_CHUNK_SIZE.
+        # Slices that fit the argument list hold only 128 paths, and each
+        # starts git and rewrites the index. One run with every path is no
+        # better, because matching many pathspecs costs more than linear.
+        def add_chunk(chunk):
+            return git_add(
+                pathspec_from_file='-',
+                pathspec_file_nul=True,
+                force=True,
+                verbose=True,
+                u=u,
+                _input=b''.join(core.encode(path) + b'\0' for path in chunk),
+            )
+
+        return utils.slice_func(items, add_chunk, size=ADD_CHUNK_SIZE)
     return utils.slice_func(
         items, lambda paths: git_add('--', force=True, verbose=True, u=u, *paths)
     )
