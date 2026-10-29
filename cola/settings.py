@@ -84,6 +84,22 @@ def remove_path(path: str) -> None:
         sys.stderr.write(f'git-cola: error removing "{path}"\n')
 
 
+def recent_key(path: str) -> str:
+    """Return the key that identifies a repository in the Recent list
+
+    The same repository reached two ways was listed twice: e.g. "/tmp/repo"
+    from a bookmark and "/private/tmp/repo" from getcwd() when the window
+    closed, or "~/Dev/X" and "~/dev/x" on the case-insensitive macOS
+    filesystem. Compare real paths, and on macOS ignore case.
+    """
+    if not path:
+        return path
+    key = display.normalize_path(core.realpath(path))
+    if core.IS_DARWIN:
+        key = key.casefold()
+    return key
+
+
 class Settings:
     config_path = resources.config_home('settings')
     bookmarks = property(lambda self: mklist(self.values['bookmarks']))
@@ -145,10 +161,10 @@ class Settings:
         return rename_entry(self.bookmarks, path, name, new_name)
 
     def add_recent(self, path: str, max_recent: int) -> None:
-        normalize = display.normalize_path
-        path = normalize(path)
+        path = display.normalize_path(path)
+        key = recent_key(path)
         try:
-            index = [normalize(recent['path']) for recent in self.recent].index(path)
+            index = [recent_key(recent['path']) for recent in self.recent].index(key)
             entry = self.recent.pop(index)
         except (IndexError, ValueError):
             entry = {
@@ -161,12 +177,11 @@ class Settings:
 
     def remove_recent(self, path: str) -> None:
         """Removes an item from the recent items list"""
-        normalize = display.normalize_path
-        path = normalize(path)
+        key = recent_key(path)
         try:
-            index = [normalize(recent.get('path', '')) for recent in self.recent].index(
-                path
-            )
+            index = [
+                recent_key(recent.get('path', '')) for recent in self.recent
+            ].index(key)
         except ValueError:
             return
         try:
