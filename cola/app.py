@@ -411,6 +411,10 @@ def worktree_for_path(path: str) -> str | None:
     # worktree with local operations.
     ops = operations_local.LocalOperations()
     path = core.abspath(path)
+    # AppKit also echoes command-line arguments that are not files at all
+    # (see launch_paths()), joined onto the working directory.
+    if not core.exists(path):
+        return None
     if core.isfile(path):
         path = os.path.dirname(path)
     if git.is_git_worktree(ops, path):
@@ -424,12 +428,15 @@ def launch_paths(argv: list[str]) -> set[str]:
     """Return the resolved paths named on the command line.
 
     Launched from a terminal rather than LaunchServices, AppKit echoes
-    command-line arguments that name existing files back to the app as
-    FileOpen events, e.g. the "git-cola" script itself for a plain
-    "git-cola". Qt only filters these while the app is still launching, and
-    the event can arrive after that, so they are filtered here as well.
+    leftover command-line arguments back to the app as FileOpen events, e.g.
+    the "git-cola" script itself for a plain "git-cola". Qt only drops the
+    ones in qApp->arguments() while the app is still launching, and the
+    event can arrive after that, so they are filtered here as well.
+    AppKit reads the process's real argv, so sys.orig_argv is included in
+    case sys.argv was rewritten (Python 3.10+).
     """
-    return {core.realpath(arg) for arg in argv if arg and not arg.startswith('-')}
+    args = list(argv) + list(getattr(sys, 'orig_argv', ()))
+    return {core.realpath(arg) for arg in args if arg and not arg.startswith('-')}
 
 
 def open_worktree(context: ApplicationContext, worktree: str) -> None:
