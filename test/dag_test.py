@@ -1228,3 +1228,25 @@ def test_neighbour_rows_prefetch_ahead_in_the_direction_of_travel():
     # Clipped to the list.
     assert neighbour_rows(0, None, 2) == [1]
     assert neighbour_rows(0, 1, 2) == [1]
+
+
+def test_graph_cells_skip_rows_where_a_tag_would_overlap():
+    """A node moves down past rows whose tagged nodes its label would cover"""
+    from cola.widgets.dag import GraphView
+
+    view = GraphView.__new__(GraphView)
+    view.min_column = -2
+    view.max_column = 1
+    view.frontier = {-2: 5, -1: 5, 0: 5, 1: 5}
+    # Tagged nodes in row 5 at column 0, and in row 6 at column -2.
+    view.tagged_rows = {5: {0}, 6: {-2}}
+    # The labels run towards higher columns (x_off < 0), so a node in column
+    # -1 overlaps the tag in column 0 but not the one in column -2.
+    assert view.x_off < 0
+    assert view.alloc_cell(-1, []) == 6
+    assert view.frontier[-1] == 7
+    # Column 1 has nothing to its right, so row 5 is free.
+    assert view.alloc_cell(1, []) == 5
+    # A tagged node is pushed past row 5 too, and records its cell.
+    assert view.alloc_cell(-2, ['v1.0']) == 6
+    assert view.tagged_rows[6] == {-2}
