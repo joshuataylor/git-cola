@@ -75,7 +75,7 @@ and the results.
 """
     )
     title = N_('Help - Find Files')
-    return text.text_dialog(context, help_text, title)
+    return text.text_dialog(context, qtutils.native_key_names(help_text), title)
 
 
 class FindFilesThread(QtCore.QThread):
