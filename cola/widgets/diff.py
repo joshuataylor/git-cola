@@ -49,6 +49,12 @@ if TYPE_CHECKING:
 
 ENABLE_INTRALINE_DIFF = True
 
+# Word-level highlighting is skipped for diffs longer than this; their lines
+# keep the added/removed colours. Pairing every changed line costs about
+# 45 us per line on the GUI thread, so an 18k-line translations update spent
+# 290 ms on it.
+INTRALINE_DIFF_MAX_LINES = 10000
+
 
 class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
     """Implements the diff syntax highlighting"""
@@ -527,6 +533,7 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         return intraline_diff.IntralineDiffConfig(
             line_pairing_strategy=line_pairing_strategy,
             granularity=granularity,
+            max_lines=INTRALINE_DIFF_MAX_LINES,
         )
 
     def _log_intraline_diff_compute_result(self, diff_text, compute_ms, result):
