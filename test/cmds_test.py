@@ -373,6 +373,8 @@ def refresh_state():
         cmds.Refresh._last_refresh = 0.0
         cmds.Refresh._pending_context = None
         cmds.Refresh._timer = None
+        cmds.Refresh._in_flight = None
+        cmds.Refresh._rerun = False
 
     reset()
     yield
@@ -381,6 +383,7 @@ def refresh_state():
 
 def test_refresh_runs_immediately_when_idle(refresh_state):
     context = Mock()
+    context.runtask = None
     cmds.Refresh(context).do()
 
     assert context.model.update_status.call_count == 1
@@ -390,6 +393,7 @@ def test_refresh_runs_immediately_when_idle(refresh_state):
 
 def test_refresh_coalesces_a_burst_into_one_trailing_refresh(refresh_state):
     context = Mock()
+    context.runtask = None
     cmds.Refresh(context).do()  # The leading edge runs synchronously.
     assert context.model.update_status.call_count == 1
 
@@ -409,6 +413,102 @@ def test_refresh_coalesces_a_burst_into_one_trailing_refresh(refresh_state):
 
     cmds.Refresh._flush()  # Nothing pending: a no-op.
     assert context.model.update_status.call_count == 2
+
+
+class _FakeRunTask:
+    """Hold started tasks so a test decides when each one finishes"""
+
+    def __init__(self):
+        self.started = []
+
+    def start(self, task, result=None):
+        self.started.append((task, result))
+
+    def finish(self):
+        task, result = self.started.pop(0)
+        result(task.task())
+
+
+def _background_context(current=True):
+    context = Mock()
+    context.runtask = _FakeRunTask()
+    context.model.is_current.return_value = current
+    return context
+
+
+def test_refresh_reads_in_the_background_and_applies_on_the_gui_thread(
+    refresh_state,
+):
+    context = _background_context()
+    cmds.Refresh(context).do()
+
+    context.model.status_query.assert_called_once_with(update_index=True)
+    assert len(context.runtask.started) == 1
+    context.model.read_status.assert_not_called()
+    context.model.update_status.assert_not_called()
+
+    context.runtask.finish()
+    query = context.model.status_query.return_value
+    context.model.read_status.assert_called_once_with(query)
+    status = context.model.read_status.return_value
+    context.model.apply_status.assert_called_once_with(status)
+    context.fsmonitor.refresh.assert_called_once_with()
+    context.selection.selection_changed.emit.assert_called_once_with()
+    context.model.update_status.assert_not_called()
+
+
+def test_refresh_drops_a_stale_read_and_reads_again(refresh_state):
+    """A stage or unstage that lands during the read wins over the read"""
+    context = _background_context(current=False)
+    cmds.Refresh._timer = timer = Mock()
+    timer.isActive.return_value = False
+    cmds.Refresh(context).do()
+    context.runtask.finish()
+
+    context.model.apply_status.assert_not_called()
+    context.fsmonitor.refresh.assert_not_called()
+    timer.start.assert_called_once_with()
+    cmds.Refresh._flush()
+    assert len(context.runtask.started) == 1
+
+
+def test_refresh_triggered_during_a_read_runs_once_more_after_it(refresh_state):
+    context = _background_context()
+    cmds.Refresh._timer = timer = Mock()
+    timer.isActive.return_value = False
+    cmds.Refresh(context).do()
+    cmds.Refresh._last_refresh = 0.0  # Outside the debounce window.
+    cmds.Refresh(context).do()
+    assert len(context.runtask.started) == 1  # Not a second concurrent read.
+
+    context.runtask.finish()
+    context.model.apply_status.assert_called_once()
+    timer.start.assert_called_once_with()
+    cmds.Refresh._flush()
+    assert len(context.runtask.started) == 1
+
+
+def test_refresh_is_not_blocked_by_a_read_from_a_closed_view(refresh_state):
+    """A read whose RunTask went away never reports back"""
+    context = _background_context()
+    cmds.Refresh(context).do()
+    context.runtask = _FakeRunTask()  # A new view, with its own RunTask.
+    cmds.Refresh._last_refresh = 0.0
+    cmds.Refresh(context).do()
+    assert len(context.runtask.started) == 1
+
+
+def test_refresh_reports_a_failed_background_read(refresh_state):
+    context = _background_context()
+    context.model.read_status.side_effect = RuntimeError('boom')
+    cmds.Refresh(context).do()
+    with patch.object(cmds.Interaction, 'critical') as critical:
+        context.runtask.finish()
+
+    critical.assert_called_once()
+    assert 'boom' in critical.call_args.kwargs['message']
+    context.model.apply_status.assert_not_called()
+    assert cmds.Refresh._in_flight is None
 
 
 def test_sequence_editor_runs_python_scripts_with_this_python(tmp_path, monkeypatch):

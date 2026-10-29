@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import cast
 
 from . import core
 from . import textwrap
@@ -956,14 +957,21 @@ def untrack_paths(context: ApplicationContext, args: list[str]) -> tuple[int, st
     return context.git.update_index('--', force_remove=True, *set(args))
 
 
+#: worktree_state() looks up the tracked branch itself.
+_RESOLVE = object()
+
+
 def worktree_state(
     context: ApplicationContext,
     head: str = 'HEAD',
     update_index: bool = False,
     display_untracked: bool = True,
     paths: list[str] | None = None,
+    tracked: str | None | object = _RESOLVE,
 ) -> dict[str, list[str] | list[Any] | set[str] | set[Any]]:
     """Return a dict of files in various states of being
+
+    `tracked` is the upstream branch, looked up from the config unless given.
 
     :rtype: dict, keys are staged, unstaged, untracked, unmerged,
             changed_upstream, and submodule.
@@ -973,10 +981,13 @@ def worktree_state(
     each on macOS), so this takes two process lifetimes rather than six.
     """
     # GitConfig reloads lazily without locking, so read it before the workers start.
-    tracked = tracked_branch(context)
+    if tracked is _RESOLVE:
+        upstream_branch = tracked_branch(context)
+    else:
+        upstream_branch = cast('str | None', tracked)
     with ThreadPoolExecutor(max_workers=4) as pool:
         # Look for upstream modified files if this is a tracking branch.
-        upstream = pool.submit(_diff_tracked, context, head, tracked)
+        upstream = pool.submit(_diff_tracked, context, head, upstream_branch)
         # The untracked walk is the slowest call in a large worktree and does
         # not use the index's stat data, so it overlaps the refresh. git
         # replaces the index by renaming a lock file over it, so a concurrent

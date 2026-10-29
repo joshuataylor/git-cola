@@ -5,6 +5,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import NamedTuple
 
 from qtpy import QtCore
 from qtpy.QtCore import Signal
@@ -29,6 +30,26 @@ FETCH = 'fetch'
 FETCH_HEAD = 'FETCH_HEAD'
 PUSH = 'push'
 PULL = 'pull'
+
+
+class StatusQuery(NamedTuple):
+    """The inputs of a status read, captured on the GUI thread"""
+
+    head: str
+    paths: list[str] | None
+    update_index: bool
+    display_untracked: bool
+    tracked: str | None
+    ref_sort: int
+    serial: int
+
+
+class StatusResult(NamedTuple):
+    """The output of a status read, applied on the GUI thread"""
+
+    query: StatusQuery
+    state: dict[str, Any]
+    refs: tuple[list[str], list[str], list[str]]
 
 
 def create(context) -> MainModel:
@@ -127,6 +148,9 @@ class MainModel(QtCore.QObject):
         self.empty_tree_oid = git.EMPTY_TREE_SHA1
         self.missing_blob_oid = git.MISSING_BLOB_SHA1
 
+        #: Bumped whenever the file lists change, so a background read can tell
+        #: that a newer update has landed since it started.
+        self.status_serial = 0
         self.modified: list[str] = []  # modified, staged, untracked, unmerged paths
         self.staged: list[str] = []
         self.untracked: list[str] = []
@@ -337,12 +361,65 @@ class MainModel(QtCore.QObject):
         self.emit_about_to_update()
         self.initialized = True
         self._update_merge_rebase_status()
+        status = self.read_status(self.status_query(update_index=update_index))
+        self._apply_status(status, reset=reset)
+
+    def status_query(self, update_index: bool = False) -> StatusQuery:
+        """Capture the inputs of a status read on the GUI thread
+
+        `read_status()` only runs git with these, so it can run on a worker
+        thread. The config is read here because GitConfig reloads lazily
+        without locking.
+        """
+        context = self.context
+        return StatusQuery(
+            head=self.head,
+            paths=self.filter_paths,
+            update_index=update_index,
+            display_untracked=prefs.display_untracked(context),
+            tracked=gitcmds.tracked_branch(context),
+            ref_sort=self.ref_sort,
+            serial=self.status_serial,
+        )
+
+    def read_status(self, query: StatusQuery) -> StatusResult:
+        """Run the git commands for a status update"""
         # The refs do not depend on the worktree, so read them alongside it.
         with ThreadPoolExecutor(max_workers=1) as pool:
-            refs = pool.submit(self._read_branches_and_tags)
-            self._update_files(update_index=update_index)
+            refs = pool.submit(self._read_branches_and_tags, query.ref_sort)
+            state = gitcmds.worktree_state(
+                self.context,
+                head=query.head,
+                update_index=query.update_index,
+                display_untracked=query.display_untracked,
+                paths=query.paths,
+                tracked=query.tracked,
+            )
+        return StatusResult(query=query, state=state, refs=refs.result())
+
+    def is_current(self, query: StatusQuery) -> bool:
+        """Would a status read for this query still be up to date?
+
+        A synchronous update since the query, or a change of mode or path
+        filter, makes the result stale.
+        """
+        return (
+            query.serial == self.status_serial
+            and query.head == self.head
+            and query.paths == self.filter_paths
+        )
+
+    def apply_status(self, status: StatusResult) -> None:
+        """Apply a status read from `read_status()`, on the GUI thread"""
+        self.emit_about_to_update()
+        self.initialized = True
+        self._update_merge_rebase_status()
+        self._apply_status(status)
+
+    def _apply_status(self, status: StatusResult, reset: bool = False) -> None:
+        self._set_files(status.state)
         self._update_remotes()
-        self._update_branches_and_tags(refs.result())
+        self._update_branches_and_tags(status.refs)
         self._update_commitmsg()
         self.update_config()
         if reset:
@@ -382,6 +459,10 @@ class MainModel(QtCore.QObject):
             display_untracked=display_untracked,
             paths=self.filter_paths,
         )
+        self._set_files(state)
+
+    def _set_files(self, state) -> None:
+        self.status_serial += 1
         self.staged = state.get('staged', [])  # type: ignore[assignment]
         self.modified = state.get('modified', [])  # type: ignore[assignment]
         self.unmerged = state.get('unmerged', [])  # type: ignore[assignment]
@@ -410,13 +491,17 @@ class MainModel(QtCore.QObject):
     def _update_remotes(self) -> None:
         self.remotes = sorted(gitcfg.get_remotes(self.cfg))
 
-    def _read_branches_and_tags(self) -> tuple[list[str], list[str], list[str]]:
+    def _read_branches_and_tags(
+        self, ref_sort: int | None = None
+    ) -> tuple[list[str], list[str], list[str]]:
         """Return (local branches, remote branches, tags) in the chosen order"""
         sort_types = (
             'version:refname',
             '-committerdate',
         )
-        sort_key = sort_types[self.ref_sort]
+        if ref_sort is None:
+            ref_sort = self.ref_sort
+        sort_key = sort_types[ref_sort]
         return gitcmds.all_refs(  # type: ignore[return-value]
             self.context, split=True, sort_key=sort_key
         )

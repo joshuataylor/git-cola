@@ -17,6 +17,7 @@ from . import core
 from . import display
 from . import gitcmds
 from . import icons
+from . import qtutils
 from . import resources
 from . import textwrap
 from . import utils
@@ -3122,17 +3123,26 @@ class Rescan(Command):
 class Refresh(Command):
     """Update refs, refresh the index, and update config
 
-    A refresh runs several git subprocesses on the GUI thread, so triggers
-    can arrive faster than a slow refresh completes -- fsmonitor events and
-    refresh-on-focus land queued behind a refresh that is already running.
-    Run immediately when idle and collapse triggers that arrive within the
-    debounce window into a single trailing refresh.
+    The git commands run on a worker thread and the result is applied on the
+    GUI thread, so a refresh in a large worktree does not freeze the window.
+    A result that a synchronous update (stage, unstage, ...) overtook is
+    dropped and read again. Triggers that arrive while a read is running ride
+    along with one more refresh once it finishes.
+
+    Triggers can also arrive faster than a refresh completes -- fsmonitor
+    events and refresh-on-focus. Run immediately when idle and collapse
+    triggers that arrive within the debounce window into a single trailing
+    refresh.
     """
 
     DEBOUNCE_SECS = 0.1
     _last_refresh = 0.0
     _pending_context = None
     _timer = None
+    # The RunTask holding the running read. A read whose RunTask went away with
+    # its view never reports back, so it must not block later refreshes.
+    _in_flight: qtutils.RunTask | None = None
+    _rerun = False
 
     UNDOABLE = False
 
@@ -3150,11 +3160,44 @@ class Refresh(Command):
 
     @classmethod
     def _refresh(cls, context) -> None:
-        context.model.update_status(update_index=True)
+        cls._last_refresh = time.time()
+        if context.runtask is None:  # No view yet, so no worker threads.
+            context.model.update_status(update_index=True)
+            cls._refreshed(context)
+            return
+        if cls._in_flight is context.runtask:
+            cls._rerun = True
+            return
+        cls._in_flight = context.runtask
+        query = context.model.status_query(update_index=True)
+        task = qtutils.SimpleTask(_read_status, context.model, query)
+        context.runtask.start(task, result=lambda result: cls._apply(context, result))
+
+    @classmethod
+    def _apply(cls, context, result) -> None:
+        """Apply a background status read on the GUI thread"""
+        cls._in_flight = None
+        cls._last_refresh = time.time()
+        model = context.model
+        if isinstance(result, Exception):
+            cls._rerun = False
+            msg, details = utils.format_exception(result)
+            Interaction.critical(N_('Error'), message=msg, details=details)
+            return
+        if model.is_current(result.query):
+            model.apply_status(result)
+            cls._refreshed(context)
+        else:
+            cls._rerun = True
+        if cls._rerun:
+            cls._rerun = False
+            cls._schedule(context)
+
+    @staticmethod
+    def _refreshed(context) -> None:
         context.cfg.update()
         context.fsmonitor.refresh()
         context.selection.selection_changed.emit()
-        cls._last_refresh = time.time()
 
     @classmethod
     def _schedule(cls, context) -> None:
@@ -3178,6 +3221,14 @@ class Refresh(Command):
         cls._pending_context = None
         if context is not None:
             cls._refresh(context)
+
+
+def _read_status(model, query):
+    """Read the status on a worker thread, returning any exception"""
+    try:
+        return model.read_status(query)
+    except Exception as exc:  # Reported on the GUI thread.
+        return exc
 
 
 class RefreshConfig(Command):
