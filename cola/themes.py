@@ -784,6 +784,26 @@ def apply_platform_theme(theme: Theme) -> None:
         app.setAppearance_(appearance)
 
 
+def apply_window_appearance(theme: Theme) -> None:
+    """Match the macOS window chrome to a flat light or dark theme
+
+    Flat themes only replace Qt's palette, so on a Light system the title
+    bars, native menus, file dialogs and sheets stayed light around dark
+    content (and the other way round). Custom .qss themes are left alone,
+    because cola cannot tell whether they are dark.
+    """
+    if not core.IS_DARWIN or AppKit is None:
+        return
+    if theme.style_sheet != EStylesheet.FLAT:
+        return
+    if theme.is_dark:
+        name = AppKit.NSAppearanceNameDarkAqua
+    else:
+        name = AppKit.NSAppearanceNameAqua
+    app = AppKit.NSApplication.sharedApplication()
+    app.setAppearance_(AppKit.NSAppearance.appearanceNamed_(name))
+
+
 def get_macos_themes():
     """Get a mapping from theme names to macOS NSAppearanceName values"""
     themes = {}
@@ -806,17 +826,20 @@ def get_macos_themes():
         True,
         'NSAppearanceNameDarkAqua',
     )
+    # Apple: the vibrant appearances are only for NSVisualEffectView content
+    # and must not be assigned to the app directly. The theme names stay
+    # selectable for existing configurations and apply plain Aqua/DarkAqua.
     add_macos_theme(
         'macos-vibrant-light',
         N_('MacOS Vibrant light'),
         False,
-        'NSAppearanceNameVibrantLight',
+        'NSAppearanceNameAqua',
     )
     add_macos_theme(
         'macos-vibrant-dark',
         N_('MacOS Vibrant dark'),
         True,
-        'NSAppearanceNameVibrantDark',
+        'NSAppearanceNameDarkAqua',
     )
     return themes
 
