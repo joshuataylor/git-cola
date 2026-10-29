@@ -966,7 +966,10 @@ def default_size(
 
 def default_monospace_font() -> QtGui.QFont:
     if core.IS_DARWIN:
-        family = 'Monaco'
+        # Menlo is macOS's system fixed-pitch font and has real bold and
+        # italic faces. Monaco only has a regular face, so the bold diff
+        # headers were synthesised.
+        family = 'Menlo'
     elif core.IS_WIN32:
         family = 'Courier'
     else:
