@@ -283,9 +283,15 @@ class CompletionLineEdit(HintedLineEdit):
 
     def keyPressEvent(self, event):
         """Process completion and navigation events"""
+        popup = self.popup()
+        # Checked before the base class sees the key, which would treat
+        # Option+Esc as Escape.
+        if not popup.isVisible() and is_popup_key(event.key(), event.modifiers()):
+            self.show_popup()
+            return
+
         super().keyPressEvent(event)
 
-        popup = self.popup()
         visible = popup.isVisible()
 
         # Hide the popup when the field becomes empty.
@@ -310,13 +316,22 @@ class CompletionLineEdit(HintedLineEdit):
             signal.emit()
             return
 
-        # Show the popup when Ctrl-Space is pressed.
-        if (
-            not visible
-            and key == Qt.Key_Space
-            and event.modifiers() == Qt.ControlModifier
-        ):
-            self.show_popup()
+
+def is_popup_key(key, modifiers) -> bool:
+    """Is this the key that shows the completion popup?
+
+    Ctrl+Space everywhere. On macOS that is Cmd+Space, which Spotlight takes
+    before the app sees it, so also accept Option+Esc (AppKit's complete:
+    key) and the physical Control key with Space.
+    """
+    modifiers = modifiers & ~Qt.KeypadModifier
+    if key == Qt.Key_Space and modifiers == Qt.ControlModifier:
+        return True
+    if not core.IS_DARWIN:
+        return False
+    if key == Qt.Key_Escape and modifiers == Qt.AltModifier:
+        return True
+    return key == Qt.Key_Space and modifiers == Qt.MetaModifier
 
 
 class GatherCompletionsThread(QtCore.QThread):
