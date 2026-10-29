@@ -1838,6 +1838,38 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         if found:
             self.select([found.commit.oid])
 
+    def go_top(self):
+        """Select the first (newest) commit"""
+        count = self.topLevelItemCount()
+        if count:
+            self.select([self.topLevelItem(0).commit.oid])
+
+    def go_bottom(self):
+        """Select the last (oldest) commit"""
+        count = self.topLevelItemCount()
+        if count:
+            self.select([self.topLevelItem(count - 1).commit.oid])
+
+    def keyPressEvent(self, event):
+        """Cmd+Up/Cmd+Down select the first/last commit on macOS
+
+        Qt treats Ctrl (Cmd) with the arrows as "move the focus without
+        selecting", so the selection and diff stayed put. Other platforms keep
+        that behaviour. macOS tags arrow keys with KeypadModifier, so ignore it.
+        """
+        modifiers = event.modifiers() & ~Qt.KeypadModifier
+        if core.IS_DARWIN and modifiers == Qt.ControlModifier:
+            key = event.key()
+            if key == Qt.Key_Up:
+                self.go_top()
+                event.accept()
+                return
+            if key == Qt.Key_Down:
+                self.go_bottom()
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def selected_commit_range(self):
         """Return a range of selected commits"""
         selected_items = self.selected_items()

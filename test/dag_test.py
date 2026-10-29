@@ -1355,3 +1355,51 @@ def test_graph_layout_leaves_unmoved_nodes_and_their_edges_alone():
     still_edge.commits_were_invalidated.assert_not_called()
     moved.setPos.assert_called_once_with(30.0, 40.0)
     moved_edge.commits_were_invalidated.assert_called_once_with()
+
+
+def _commit_list(app_context, count=5):
+    """A commit list with a linear history, newest first"""
+    tree = CommitTreeWidget(app_context, None)
+    commits = []
+    parent = None
+    for idx in range(count):
+        parents = [parent] if parent else None
+        parent = _commit_for_graph(app_context, f'{idx:x}' * 40, parents=parents)
+        commits.append(parent)
+    tree.add_commits(commits)
+    return tree
+
+
+@pytest.mark.parametrize('keypad', [False, True])
+def test_cmd_up_and_down_select_the_first_and_last_commit_on_macos(
+    qapp, app_context, monkeypatch, keypad
+):
+    """macOS arrow keys can carry KeypadModifier, which must not matter"""
+    from qtpy.QtTest import QTest
+
+    monkeypatch.setattr('cola.widgets.dag.core.IS_DARWIN', True)
+    tree = _commit_list(app_context)
+    middle = tree.topLevelItem(2)
+    tree.select([middle.commit.oid])
+    mods = Qt.ControlModifier | (Qt.KeypadModifier if keypad else Qt.NoModifier)
+
+    QTest.keyClick(tree, Qt.Key_Up, mods)
+    assert tree.selectedItems() == [tree.topLevelItem(0)]
+    assert tree.currentItem() is tree.topLevelItem(0)
+
+    QTest.keyClick(tree, Qt.Key_Down, mods)
+    last = tree.topLevelItem(tree.topLevelItemCount() - 1)
+    assert tree.selectedItems() == [last]
+    assert tree.currentItem() is last
+
+
+def test_ctrl_up_keeps_qt_behaviour_off_macos(qapp, app_context, monkeypatch):
+    """Elsewhere Ctrl+Up still moves the focus without changing the selection"""
+    from qtpy.QtTest import QTest
+
+    monkeypatch.setattr('cola.widgets.dag.core.IS_DARWIN', False)
+    tree = _commit_list(app_context)
+    middle = tree.topLevelItem(2)
+    tree.select([middle.commit.oid])
+    QTest.keyClick(tree, Qt.Key_Up, Qt.ControlModifier)
+    assert tree.selectedItems() == [middle]
