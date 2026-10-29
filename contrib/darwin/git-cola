@@ -8,8 +8,19 @@ contents="$(dirname "$macos")"
 # resources = Contents/Resources
 resources="${contents}/Resources"
 
-# Setup PATH for git-osx-installer and other common locations
-PATH="${resources}/bin:${PATH}:/usr/local/bin:/usr/local/git/bin"
+# Finder and the Dock start apps with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+# where git is Apple's Command Line Tools shim and git-lfs, gpg, gh and
+# Homebrew editors and diff tools are missing. Put the common install
+# locations first, Apple Silicon Homebrew first of all, so the app finds the
+# same tools as a terminal: git-osx-installer, Intel Homebrew, MacPorts.
+for dir in /usr/local/git/bin /usr/local/bin /opt/local/bin /opt/homebrew/sbin /opt/homebrew/bin
+do
+	if test -d "$dir"
+	then
+		PATH="${dir}:${PATH}"
+	fi
+done
+PATH="${resources}/bin:${PATH}"
 export PATH
 
 exec python "${contents}/Resources/bin/git-cola" --prompt
