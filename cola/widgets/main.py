@@ -963,6 +963,14 @@ class MainView(standard.MainWindow):
         self.help_menu.addAction(self.help_shortcuts_action)
         self.help_menu.addAction(self.help_about_action)
 
+        if core.IS_DARWIN:
+            self.window_menu = qtutils.add_window_menu(
+                self,
+                self.menubar,
+                before=self.help_menu,
+                minimize_action=self.minimize_action,
+            )
+
         # Arrange dock widgets
         bottom = Qt.BottomDockWidgetArea
         top = Qt.TopDockWidgetArea
@@ -1128,8 +1136,6 @@ class MainView(standard.MainWindow):
 
     def build_view_menu(self, menu):
         menu.clear()
-        if core.IS_DARWIN:
-            menu.addAction(self.minimize_action)
         menu.addAction(self.browse_action)
         menu.addAction(self.dag_action)
         menu.addSeparator()
