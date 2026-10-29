@@ -97,3 +97,19 @@ def test_create_dock_keeps_floating_docks_visible(qapp):
     window = QtWidgets.QMainWindow()
     dock = qtutils.create_dock('Diff', 'Diff', window)
     assert dock.testAttribute(Qt.WA_MacAlwaysShowToolWindow)
+
+
+def test_native_key_names_on_macos(monkeypatch):
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
+    assert qtutils.native_key_names('Shortcut: Ctrl+Enter') == 'Shortcut: Cmd+Enter'
+    assert qtutils.native_key_names('ctrl + 1, alt + a') == 'cmd + 1, option + a'
+    assert qtutils.native_key_names('Ctrl + Alt + C') == 'Cmd + Option + C'
+    # Only whole words change.
+    assert qtutils.native_key_names('Alternatively, Control') == (
+        'Alternatively, Control'
+    )
+
+
+def test_native_key_names_elsewhere(monkeypatch):
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', False)
+    assert qtutils.native_key_names('Ctrl + Alt + C') == 'Ctrl + Alt + C'

@@ -1,6 +1,7 @@
 """Miscellaneous Qt utility functions."""
 from __future__ import annotations
 import os
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
@@ -1230,6 +1231,25 @@ class DockTitleBarWidget(QtWidgets.QFrame):
             tooltip = N_('Detach')
         self.toggle_button.setToolTip(tooltip)
         self.toggle_button.setVisible(floating)
+
+
+def native_key_names(text: str) -> str:
+    """Name modifier keys the way a Mac keyboard labels them
+
+    Help text and tooltips say "Ctrl" and "Alt", but Qt's Ctrl is the
+    Command key on macOS and Alt is labelled Option. This runs after
+    translation, so the message catalogs keep their msgids.
+    """
+    if not core.IS_DARWIN:
+        return text
+    for old, new in (
+        ('Ctrl', 'Cmd'),
+        ('ctrl', 'cmd'),
+        ('Alt', 'Option'),
+        ('alt', 'option'),
+    ):
+        text = re.sub(rf'\b{old}\b', new, text)
+    return text
 
 
 def keep_tool_window_visible(widget: QtWidgets.QWidget) -> None:
