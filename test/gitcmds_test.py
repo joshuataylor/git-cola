@@ -128,13 +128,20 @@ def test_worktree_state(app_context):
     assert state['untracked'] == []
 
 
-def test_worktree_state_refreshes_the_index_before_diff_files(app_context):
-    """A stat-only change is hidden once update_index refreshes the index"""
+def test_worktree_state_refreshes_the_index_before_diff_files(app_context, monkeypatch):
+    """A stat-only change is hidden once update_index refreshes the index
+
+    git status refreshes in memory, so only the diff-files fallback needs it.
+    """
+    monkeypatch.setenv('GIT_OPTIONAL_LOCKS', '0')  # As the app runs git.
     helper.commit_files()
     helper.write_file('A', '')
     os.utime('A', (0, 0))
-    assert gitcmds.worktree_state(app_context)['modified'] == ['A']
-    assert gitcmds.worktree_state(app_context, update_index=True)['modified'] == []
+    assert gitcmds.worktree_state(app_context)['modified'] == []
+    by_diff = gitcmds.diff_files_state(app_context, 'HEAD', False, True, None, False)
+    assert by_diff.modified == ['A']
+    by_diff = gitcmds.diff_files_state(app_context, 'HEAD', True, True, None, False)
+    assert by_diff.modified == []
 
 
 def test_all_files(app_context):
