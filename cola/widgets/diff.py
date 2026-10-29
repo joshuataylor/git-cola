@@ -54,6 +54,18 @@ ENABLE_INTRALINE_DIFF = True
 # 45 us per line on the GUI thread, so an 18k-line translations update spent
 # 290 ms on it.
 INTRALINE_DIFF_MAX_LINES = 10000
+# Changed-line characters above which the intra-line spans are computed on a
+# worker after the diff is shown. The cost is about 1.7 us per character, so
+# smaller diffs keep the single highlight pass of a synchronous compute.
+INTRALINE_DIFF_SYNC_CHARS = 20000
+# Milliseconds to wait for the selection to settle before starting a deferred
+# compute, so that holding an arrow key over large files computes nothing.
+INTRALINE_DIFF_DELAY_MS = 100
+
+
+def _changed_line_chars(diff: str) -> int:
+    """Count the characters on the changed ("+" or "-") lines of a diff"""
+    return sum(len(line) for line in diff.split('\n') if line[:1] in ('+', '-'))
 
 
 class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
@@ -311,6 +323,13 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         self._current_diff_text: str = ''
         # What set_diff() last rendered, see _render_key().
         self._rendered_key: tuple | None = None
+        # Deferred intra-line spans for large diffs, see set_diff().
+        self._intraline_generation = 0
+        self._intraline_runtask = qtutils.RunTask(parent=self)
+        self._intraline_timer = QtCore.QTimer(self)
+        self._intraline_timer.setSingleShot(True)
+        self._intraline_timer.setInterval(INTRALINE_DIFF_DELAY_MS)
+        self._intraline_timer.timeout.connect(self._start_deferred_intraline)
 
         self.diff_lines = diffparse.DiffLines()
         if numbers:
@@ -432,10 +451,20 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         # Compute the intra-line spans before the document is set, so that
         # setPlainText's highlight pass applies them in one go. Setting them
-        # afterwards meant a second full-document rehighlight.
+        # afterwards meant a second full-document rehighlight. A large diff is
+        # shown first and gets its spans from a worker instead, because the
+        # word-level matching of long lines can take most of a second.
         self._current_diff_text = diff
-        self.highlighter.preset_intraline_spans(self._compute_intraline_spans())
-        self.set_value(diff)
+        self._intraline_generation += 1
+        self._intraline_timer.stop()
+        if _changed_line_chars(diff) > INTRALINE_DIFF_SYNC_CHARS:
+            self.highlighter.preset_intraline_spans({})
+            self.set_value(diff)
+            if self._should_enable_intraline_diff():
+                self._intraline_timer.start()
+        else:
+            self.highlighter.preset_intraline_spans(self._compute_intraline_spans())
+            self.set_value(diff)
 
         self.restore_scrollbar()
         self._rendered_key = self._render_key(diff)
@@ -506,6 +535,9 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     # vvv inline-diff highlight begin vvv
     def update_intraline_diff_spans(self) -> None:
         """(Re)compute and apply intra-line spans for the current diff text."""
+        # A deferred compute for the old settings must not land afterwards.
+        self._intraline_generation += 1
+        self._intraline_timer.stop()
         self.highlighter.set_intraline_spans(self._compute_intraline_spans())
 
     def _compute_intraline_spans(self) -> intraline_diff.SpansByLineIndex:
@@ -524,6 +556,31 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         )
         self._log_intraline_diff_compute_result(diff_text, compute_ms, result)
         return intraline_spans
+
+    def _start_deferred_intraline(self) -> None:
+        """Compute the spans of the shown diff on a worker thread"""
+        intraline_cfg = self._build_intraline_diff_config()
+        if intraline_cfg is None or not self._should_enable_intraline_diff():
+            return
+        generation = self._intraline_generation
+        diff_text = self._current_diff_text
+        task = qtutils.SimpleTask(
+            self._try_compute_intraline_spans, diff_text, intraline_cfg
+        )
+        self._intraline_runtask.start(
+            task,
+            result=lambda result: self._apply_deferred_intraline(
+                generation, diff_text, result
+            ),
+        )
+
+    def _apply_deferred_intraline(self, generation, diff_text, result) -> None:
+        """Apply deferred spans if their diff is still the one shown"""
+        if generation != self._intraline_generation:
+            return
+        spans, compute_ms, compute_result = result
+        self._log_intraline_diff_compute_result(diff_text, compute_ms, compute_result)
+        self.highlighter.set_intraline_spans(spans)
 
     def _should_enable_intraline_diff(self) -> bool:
         """Return True when intra-line diff highlighting should be computed."""
