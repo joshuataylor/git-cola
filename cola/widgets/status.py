@@ -1653,6 +1653,7 @@ class StatusFilterWidget(QtWidgets.QWidget):
 def customize_copy_actions(context, parent):
     """Customize copy actions"""
     dialog = CustomizeCopyActions(context, parent)
+    qtutils.set_dialog_modality(dialog)
     dialog.show()
     dialog.exec_()
 
