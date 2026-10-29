@@ -448,3 +448,35 @@ def test_cmd_down_is_left_to_qt_when_jump_keys_are_disabled(widget, monkeypatch)
     _press(widget, Qt.Key_Down, Qt.ControlModifier | Qt.KeypadModifier)
 
     assert _all_selected(widget) == ['m1']
+
+
+def test_select_all_and_refresh_keep_a_large_selection(widget):
+    """Thousands of files are selected and restored in ranges, not one by one"""
+    modified = [f'm{i:05d}' for i in range(3000)]
+    untracked = [f'u{i:05d}' for i in range(3000)]
+    widget._model.set_contents(modified=modified, untracked=untracked)
+    widget.refresh()
+    widget.selectAll()
+    first = widget.topLevelItem(status.MODIFIED_IDX).child(0)
+    assert widget.currentItem() is first
+    assert widget.modified() == modified
+    assert widget.untracked() == untracked
+
+    # A refresh with the same files (Cmd+R) restores the whole selection.
+    widget.previous_contents = selection.State([], [], modified, untracked)
+    widget._save_selection()
+    widget.refresh()
+    assert widget.modified() == modified
+    assert widget.untracked() == untracked
+
+    # With gaps, each run of kept files is selected and nothing else.
+    kept = untracked[:10] + untracked[20:30]
+    with qtutils.BlockSignals(widget):  # The fake model has no modes.
+        widget.clearSelection()
+    for name in kept:
+        _select_untracked(widget, [name], current=None)
+    widget.previous_contents = selection.State([], [], modified, untracked)
+    widget._save_selection()
+    widget.refresh()
+    assert widget.untracked() == kept
+    assert widget.modified() == []
