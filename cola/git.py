@@ -303,8 +303,11 @@ class Git:
             # SSH uses the SSH_ASKPASS variable only if the process is really
             # detached from the TTY (stdin redirection and setting the
             # SSH_ASKPASS environment variable is not enough).  To detach a
-            # process from the console it should fork and call os.setsid().
-            extra['preexec_fn'] = os.setsid
+            # process from the console it should run in a new session.
+            # start_new_session calls setsid() in the child without running
+            # Python there, which preexec_fn does and which is unsafe after
+            # fork() in a threaded process (Qt, and PyObjC on macOS).
+            extra['start_new_session'] = True
 
         start_time = time.time()
 
