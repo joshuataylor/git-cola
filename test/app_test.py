@@ -1,9 +1,13 @@
 import argparse
 import os
 import plistlib
+import shutil
+import subprocess
 import sys
 import types
 from unittest.mock import MagicMock
+
+import pytest
 
 from cola import app
 from cola import core
@@ -343,3 +347,33 @@ def test_set_process_title_survives_missing_package(monkeypatch):
     """A missing setproctitle package is a silent no-op"""
     monkeypatch.setitem(sys.modules, 'setproctitle', None)
     app.set_process_title()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX shell launcher')
+def test_darwin_launcher_puts_package_managers_before_the_system_path(tmp_path):
+    """Finder launches get /usr/bin:/bin, so git would be Apple's CLT shim"""
+    launcher = os.path.join(
+        os.path.dirname(__file__), '..', 'contrib', 'darwin', 'git-cola'
+    )
+    macos = tmp_path / 'Contents' / 'MacOS'
+    bindir = tmp_path / 'Contents' / 'Resources' / 'bin'
+    macos.mkdir(parents=True)
+    bindir.mkdir(parents=True)
+    shutil.copy(launcher, macos / 'git-cola')
+    python = bindir / 'python'
+    python.write_text('#!/bin/sh\nprintf %s "$PATH"\n')
+    python.chmod(0o755)
+
+    result = subprocess.run(
+        ['/bin/sh', str(macos / 'git-cola')],
+        env={'PATH': '/usr/bin:/bin'},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    path = result.stdout.split(':')
+    assert path[0] == str(bindir)
+    system = path.index('/usr/bin')
+    for candidate in ('/opt/homebrew/bin', '/usr/local/bin'):
+        if os.path.isdir(candidate):
+            assert path.index(candidate) < system
