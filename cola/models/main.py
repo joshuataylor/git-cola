@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -336,9 +337,12 @@ class MainModel(QtCore.QObject):
         self.emit_about_to_update()
         self.initialized = True
         self._update_merge_rebase_status()
-        self._update_files(update_index=update_index)
+        # The refs do not depend on the worktree, so read them alongside it.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            refs = pool.submit(self._read_branches_and_tags)
+            self._update_files(update_index=update_index)
         self._update_remotes()
-        self._update_branches_and_tags()
+        self._update_branches_and_tags(refs.result())
         self._update_commitmsg()
         self.update_config()
         if reset:
@@ -406,16 +410,23 @@ class MainModel(QtCore.QObject):
     def _update_remotes(self) -> None:
         self.remotes = sorted(gitcfg.get_remotes(self.cfg))
 
-    def _update_branches_and_tags(self) -> None:
-        context = self.context
+    def _read_branches_and_tags(self) -> tuple[list[str], list[str], list[str]]:
+        """Return (local branches, remote branches, tags) in the chosen order"""
         sort_types = (
             'version:refname',
             '-committerdate',
         )
         sort_key = sort_types[self.ref_sort]
-        local_branches, remote_branches, tags = gitcmds.all_refs(
-            context, split=True, sort_key=sort_key
+        return gitcmds.all_refs(  # type: ignore[return-value]
+            self.context, split=True, sort_key=sort_key
         )
+
+    def _update_branches_and_tags(
+        self, refs: tuple[list[str], list[str], list[str]] | None = None
+    ) -> None:
+        if refs is None:
+            refs = self._read_branches_and_tags()
+        local_branches, remote_branches, tags = refs
         self.local_branches = local_branches
         self.remote_branches = remote_branches
         self.tags = tags
