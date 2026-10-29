@@ -1923,8 +1923,6 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
                 if tag == head:
                     head_oid = commit.oid
 
-        self.insertTopLevelItems(0, items)
-
         graph_result = build_graph(
             [
                 (commit.oid, [parent.oid for parent in commit.parents])
@@ -1932,10 +1930,19 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             ],
             head_oid=head_oid,
         )
+        # Before the items join the tree: setData() on an item in a tree
+        # notifies the view on every call, about 5 us each and three per row.
         self.apply_graph_result(graph_result)
+        self.insertTopLevelItems(0, items)
+        # Resize column to fit content after graph data is loaded.
+        if self._column_init_state < ColumnInitState.GRAPH:
+            self._column_init_state = ColumnInitState.GRAPH
+            if not prefs.dag_sticky_columns(self.context):
+                self.resizeColumnToContents(CommitTreeWidgetItem.SUMMARY)
         self.commits_changed.emit()
 
     def apply_graph_result(self, graph_result) -> None:
+        """Attach the graph rows to the items of the commits just added"""
         # Rows only describe the chunk that was just added, so resolve them
         # through the oid->item map instead of rescanning every tree item.
         prev_row = None
@@ -1951,11 +1958,6 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
                         prev_row,
                     )
             prev_row = row
-        # Resize column to fit content after graph data is loaded.
-        if self._column_init_state < ColumnInitState.GRAPH:
-            self._column_init_state = ColumnInitState.GRAPH
-            if not prefs.dag_sticky_columns(self.context):
-                self.resizeColumnToContents(CommitTreeWidgetItem.SUMMARY)
 
     def create_patch(self):
         """Export a patch from the selected items"""
