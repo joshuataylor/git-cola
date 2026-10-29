@@ -111,3 +111,34 @@ def test_huge_diffs_skip_intraline_spans(qapp, app_context, monkeypatch):
         '@@ -1 +1 @@\n-total = compute_total(items, tax=0.10)\n+total = compute_total(items, tax=0.15)\n'
     )
     assert widget.highlighter._intraline_spans == {}
+
+
+_DIFF = '@@ -1 +1 @@\n-total = compute_total(items, tax=0.10)\n+total = compute_total(items, tax=0.15)\n'
+
+
+def test_set_diff_skips_an_identical_diff(qapp, app_context):
+    """A refresh that re-diffs an unchanged file does not render it again"""
+    from unittest.mock import patch
+
+    edit, _calls = _diff_text_edit(app_context)
+    edit.set_diff(_DIFF)
+    with patch.object(edit, '_compute_intraline_spans', return_value={}) as compute:
+        edit.set_diff(_DIFF)
+        compute.assert_not_called()
+        edit.set_diff(_DIFF.replace('0.15', '0.20'))
+        assert compute.call_count == 1
+    assert '0.20' in edit.toPlainText()
+
+
+def test_set_diff_renders_again_after_another_write(qapp, app_context):
+    """An ANSI diff or other text in between forces a real render"""
+    edit, _calls = _diff_text_edit(app_context)
+    edit.set_diff(_DIFF)
+    edit.set_ansi_diff('plain text')
+    assert edit.toPlainText() == 'plain text'
+    edit.set_diff(_DIFF)
+    assert edit.toPlainText() == _DIFF.rstrip('\n')
+    assert edit.highlighter.enabled
+    edit.clear()
+    edit.set_diff(_DIFF)
+    assert edit.toPlainText() == _DIFF.rstrip('\n')

@@ -308,6 +308,8 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         self._intraline_diff_timing = False
 
         self._current_diff_text: str = ''
+        # What set_diff() last rendered, see _render_key().
+        self._rendered_key: tuple | None = None
 
         self.diff_lines = diffparse.DiffLines()
         if numbers:
@@ -410,6 +412,12 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         """Set the diff text and restore the scrollbar position post-update"""
         diff = diff.rstrip('\n')  # diffs include two empty newlines
         diff = _truncate_diff(diff, self.max_diff_size * self.max_diff_size_unit)
+        # A status refresh re-runs the diff of the selected file in case its
+        # content changed. When it did not, the document is already showing
+        # this diff, and rendering it again re-ran the intra-line highlighting:
+        # hundreds of milliseconds on a diff with long lines.
+        if self._rendered_key == self._render_key(diff):
+            return
 
         self.save_scrollbar()
 
@@ -429,6 +437,15 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         self.set_value(diff)
 
         self.restore_scrollbar()
+        self._rendered_key = self._render_key(diff)
+
+    def _render_key(self, diff):
+        """What set_diff() output depends on, and whether the document changed
+
+        The document revision moves on any other write, such as an ANSI diff,
+        a loading message or a clear, so those always render again.
+        """
+        return (diff, self._intraline_diff_preset, self.document().revision())
 
     def scroll_to_diff_header(self):
         """Scroll so the first file's diff header sits at the top of the view
