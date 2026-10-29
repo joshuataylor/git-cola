@@ -3395,7 +3395,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.max_column = 0
         self.min_column = 0
         self.frontier = {}
-        self.tagged_cells = set()
+        # row -> the columns of the tagged commits in that row
+        self.tagged_rows = {}
 
         self.x_start = 24
         self.x_min = 24
@@ -3906,7 +3907,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
 
     def reset_rows(self):
         self.frontier = {}
-        self.tagged_cells = set()
+        # row -> the columns of the tagged commits in that row
+        self.tagged_rows = {}
 
     def declare_column(self, column):
         if self.frontier:
@@ -3993,18 +3995,17 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
             can_overlap = range(self.min_column, column)
         else:
             can_overlap = range(self.max_column, column, -1)
-        for cell_row_entry in itertools.count(cell_row):
-            for value in can_overlap:
-                if (value, cell_row_entry) in self.tagged_cells:
-                    # Overlapping. Try next row.
-                    break
-            else:
+        # Only the few tagged columns in a row are checked, rather than every
+        # column that could overlap, which is slow on a wide graph.
+        for cell_row in itertools.count(cell_row):
+            tagged = self.tagged_rows.get(cell_row)
+            if not tagged or not any(value in can_overlap for value in tagged):
                 # No overlapping was found.
                 break
-            # Note that all checks should be made for new cell_row value.
+            # Overlapping. Try next row.
 
         if tags:
-            self.tagged_cells.add((column, cell_row))
+            self.tagged_rows.setdefault(cell_row, set()).add(column)
 
         # Propagate frontier.
         self.frontier[column] = cell_row + 1
