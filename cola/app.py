@@ -339,6 +339,7 @@ class ColaApplication:
             themes.apply_platform_theme(theme_str)
         elif theme_str != 'default':
             self._app.setPalette(theme.build_palette(self._app.palette()))
+            themes.apply_window_appearance(theme)
 
     def refresh_system_appearance(self) -> None:
         """Rebuild styles that follow the system palette."""
