@@ -105,6 +105,29 @@ def test_tags(app_context):
     assert app_context.model.tags == ['test']
 
 
+def test_update_status_reads_refs_and_files_together(app_context):
+    """update_status() fills the refs it reads alongside the worktree"""
+    helper.commit_files()
+    helper.run_git('tag', 'v1.9')
+    helper.run_git('tag', 'v1.10')
+    helper.run_git('branch', 'other')
+    helper.touch('C')
+    app_context.model.update_status()
+    assert app_context.model.local_branches == ['main', 'other']
+    # Version order, newest first.
+    assert app_context.model.tags == ['v1.10', 'v1.9']
+    assert app_context.model.untracked == ['C']
+
+
+def test_update_refs_reads_refs_itself(app_context):
+    """update_refs() still reads the refs without a worktree update"""
+    helper.commit_files()
+    app_context.model.update_status()
+    helper.run_git('tag', 'test')
+    app_context.model.update_refs()
+    assert app_context.model.tags == ['test']
+
+
 def test_remote_args_fetch(mock_context):
     """FETCH swaps arguments vs. PUSH and PULL"""
     (args, kwargs) = main.remote_args(
