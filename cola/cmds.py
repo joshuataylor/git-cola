@@ -4437,11 +4437,29 @@ def run(cls: Any, *args, **opts) -> Callable:
     return runner
 
 
-def do(cls: Any, *args, **opts) -> Any:
+def run_stamped(cls: Any, *args, **opts) -> Callable:
+    """Return a callback that runs a command stamped with the time of this call
+
+    A command drops its result when the context has moved past its
+    timestamp. A command built on a worker thread would otherwise take its
+    stamp whenever a thread gets to it, so an older request could look newer
+    and overwrite the newer result.
+    """
+    timestamp = time.time()
+
+    def runner():
+        return do(cls, *args, _timestamp=timestamp, **opts)
+
+    return runner
+
+
+def do(cls: Any, *args, _timestamp: float | None = None, **opts) -> Any:
     """Run a command in-place"""
     result = True
     try:
         cmd = cls(*args, **opts)
+        if _timestamp is not None:
+            cmd.timestamp = _timestamp
         cmd.context.command_bus.do(cmd, queued=False)
     except Exception as exc:
         msg, details = utils.format_exception(exc)

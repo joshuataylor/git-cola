@@ -1279,7 +1279,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
                 UNMERGED_IDX: cmds.UnmergedSummary,
                 UNTRACKED_IDX: cmds.UntrackedSummary,
             }.get(idx, cmds.Diffstat)
-            runtask.run(cmds.run(cls, context))
+            runtask.run(cmds.run_stamped(cls, context))
             return
 
         staged = category == STAGED_IDX
@@ -1319,24 +1319,27 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         else:
             finalizer = partial(cmds.DiffText, context)
 
-        # Update the diff text
+        # Update the diff text. The commands are stamped now, on the GUI
+        # thread, so a slow diff of an earlier selection never replaces the
+        # diff of the current one, and nothing waits for the worker threads.
         if staged:
             runtask.run(
-                cmds.run(
+                cmds.run_stamped(
                     cmds.DiffStaged, context, path, deleted=deleted, finalizer=finalizer
                 )
             )
         elif modified:
             runtask.run(
-                cmds.run(cmds.Diff, context, path, deleted=deleted, finalizer=finalizer)
+                cmds.run_stamped(
+                    cmds.Diff, context, path, deleted=deleted, finalizer=finalizer
+                )
             )
         elif unmerged:
-            runtask.run(cmds.run(cmds.Diff, context, path, finalizer=finalizer))
+            runtask.run(cmds.run_stamped(cmds.Diff, context, path, finalizer=finalizer))
         elif untracked:
             runtask.run(
-                cmds.run(cmds.ShowUntracked, context, path, finalizer=finalizer)
+                cmds.run_stamped(cmds.ShowUntracked, context, path, finalizer=finalizer)
             )
-        runtask.threadpool.waitForDone(64)
 
     def select_header(self):
         """Select an active header, which triggers a diffstat"""

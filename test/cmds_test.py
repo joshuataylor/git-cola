@@ -574,3 +574,30 @@ def test_edit_passes_goto_as_two_arguments(monkeypatch, editor):
     context = Mock()
     cmds.Edit(context, ['a.py', 'b.py'], line_number=12).do()
     assert forked == [[editor, '--goto', 'a.py:12', 'b.py']]
+
+
+def test_run_stamped_orders_commands_by_request_not_by_completion():
+    """A slow diff of an earlier selection must not replace the current one"""
+    from cola.cmd import Command
+
+    shown = []
+
+    class ShowPath(Command):
+        def __init__(self, context, path):
+            super().__init__(context)
+            self.path = path
+
+        def do(self):
+            if super().do():
+                shown.append(self.path)
+
+    context = Mock()
+    context.timestamp = 0.0
+    context.command_bus.do.side_effect = lambda cmd, queued=False: cmd.do()
+    first = cmds.run_stamped(ShowPath, context, 'first')
+    time.sleep(0.01)
+    second = cmds.run_stamped(ShowPath, context, 'second')
+    # The worker threads finish in the opposite order.
+    second()
+    first()
+    assert shown == ['second']
