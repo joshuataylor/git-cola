@@ -1477,6 +1477,10 @@ class MainView(standard.MainWindow):
 class FocusProxy:
     """Proxy over child widgets and operate on the focused widget"""
 
+    # Operations whose labels name the commit message ("Undo Message"), so
+    # they always target it.
+    message_only = frozenset(('undo', 'redo'))
+
     def __init__(self, *widgets):
         self.widgets = widgets
         self.overrides = {}
@@ -1495,11 +1499,29 @@ class FocusProxy:
         widgets = widgets[1:]
 
         focus = qtutils.app().focusWidget()
-        if focus not in widgets:
-            focus = parent.focusWidget()
+        if focus in widgets:
+            return focus
+        if self._is_other_pane(focus, parent, name):
+            return focus
+        focus = parent.focusWidget()
         if focus not in widgets:
             focus = fallback
         return focus
+
+    def _is_other_pane(self, focus, parent, name):
+        """Is the keyboard in a pane the Edit menu must not reach past?
+
+        On macOS the Edit menu's Cmd+X/V/Delete are native menu key
+        equivalents, and Cocoa fires them whenever the focused widget does not
+        claim the key -- e.g. the status tree or the read-only diff. Falling
+        back to the commit message then pasted into, or cut from, a field the
+        user was not looking at. There the focused pane gets the operation
+        itself, or nothing. Elsewhere the menu only fires on a click, which
+        keeps the message fallback.
+        """
+        if not core.IS_DARWIN or name in self.message_only or focus is None:
+            return False
+        return focus is not parent and not parent.isAncestorOf(focus)
 
     def __getattr__(self, name):
         """Return a callback that calls a common child method"""
@@ -1518,6 +1540,9 @@ class FocusProxy:
     def delete(self):
         """Specialized delete() to deal with QLineEdit vs. QTextEdit"""
         focus = self.focus('delete')
+        # QTextCursor edits ignore read-only, so never touch e.g. the diff.
+        if getattr(focus, 'isReadOnly', lambda: False)():
+            return
         if hasattr(focus, 'del_'):
             focus.del_()
         elif hasattr(focus, 'textCursor'):
