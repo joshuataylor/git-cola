@@ -384,3 +384,29 @@ def test_option_chord_is_darwin_only(qapp, monkeypatch):
     monkeypatch.setattr(text.core, 'IS_DARWIN', False)
     widget = text.LineEdit()
     assert not text.types_option_chord(widget, _override(Qt.Key_A, Qt.AltModifier))
+
+
+def test_cursor_position_is_reported_to_listeners(qapp):
+    """The row and column still reach a listener such as the commit editor"""
+    widget = text.TextEdit()
+    widget.setPlainText('one\ntwo\n\tthree')
+    positions = []
+    widget.cursor_changed.connect(lambda row, col: positions.append((row, col)))
+    cursor = widget.textCursor()
+    cursor.setPosition(len('one\ntwo\n\tth'))
+    widget.setTextCursor(cursor)
+    # The tab counts as tabwidth columns.
+    assert positions[-1] == (3, 3 + widget.ext.tabwidth() - 1)
+
+
+def test_cursor_position_skips_the_document_copy_without_listeners(qapp, monkeypatch):
+    """A widget nobody tracks, like the console log, never copies its text"""
+    widget = text.TextEdit()
+    widget.setPlainText('one\ntwo')
+    calls = []
+    monkeypatch.setattr(widget.ext, 'get', lambda: calls.append(1) or '')
+    cursor = widget.textCursor()
+    cursor.setPosition(5)
+    widget.setTextCursor(cursor)
+    assert calls == []
+
