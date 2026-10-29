@@ -118,3 +118,73 @@ def test_render_svg_to_pixmap_scales(qapp, svg_path):
     assert pixmap.devicePixelRatio() == 3.0
     assert pixmap.width() == 354
     assert pixmap.height() == 354
+
+
+def _wheel(view, angle, pixels=(0, 0), modifiers=None, phase=None):
+    from qtpy import QtCore
+    from qtpy.QtCore import Qt
+
+    center = QtCore.QPointF(view.viewport().rect().center())
+    return QtGui.QWheelEvent(
+        center,
+        QtCore.QPointF(view.viewport().mapToGlobal(center.toPoint())),
+        QtCore.QPoint(*pixels),
+        QtCore.QPoint(0, angle),
+        Qt.NoButton,
+        modifiers if modifiers is not None else Qt.NoModifier,
+        phase if phase is not None else Qt.NoScrollPhase,
+        False,
+    )
+
+
+@pytest.fixture
+def zoomable(qapp):
+    view = imageview.ImageView()
+    view.resize(200, 200)
+    view.image = QtGui.QImage(400, 400, QtGui.QImage.Format_RGB32)
+    view.show()
+    view.reset()
+    return view
+
+
+def test_mouse_wheel_notch_zooms_one_step(zoomable):
+    before = zoomable.current_scene_ROI.width()
+    zoomable.wheelEvent(_wheel(zoomable, 120))
+    after = zoomable.current_scene_ROI.width()
+    assert after == pytest.approx(before / zoomable.zoom_factor)
+
+
+def test_trackpad_scroll_pans_instead_of_zooming(zoomable):
+    zoomable.wheelEvent(_wheel(zoomable, 120))  # zoom in so there is room to pan
+    roi = zoomable.current_scene_ROI
+    zoomable.wheelEvent(_wheel(zoomable, 8, pixels=(0, 4)))
+    after = zoomable.current_scene_ROI
+    assert after.width() == pytest.approx(roi.width())
+    assert after.top() != pytest.approx(roi.top())
+
+
+def test_trackpad_zoom_with_cmd_is_proportional(zoomable):
+    from qtpy.QtCore import Qt
+
+    before = zoomable.current_scene_ROI.width()
+    zoomable.wheelEvent(
+        _wheel(zoomable, 12, pixels=(0, 6), modifiers=Qt.ControlModifier)
+    )
+    after = zoomable.current_scene_ROI.width()
+    assert after == pytest.approx(before / zoomable.zoom_factor**0.1)
+
+
+def test_trackpad_momentum_does_not_zoom(zoomable):
+    from qtpy.QtCore import Qt
+
+    before = zoomable.current_scene_ROI.width()
+    zoomable.wheelEvent(
+        _wheel(
+            zoomable,
+            12,
+            pixels=(0, 6),
+            modifiers=Qt.ControlModifier,
+            phase=Qt.ScrollMomentum,
+        )
+    )
+    assert zoomable.current_scene_ROI.width() == pytest.approx(before)
