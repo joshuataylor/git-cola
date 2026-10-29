@@ -2835,12 +2835,30 @@ def unix_path(path: str, is_win32: bool = core.IS_WIN32) -> str:
 
 def sequence_editor() -> str:
     """Set GIT_SEQUENCE_EDITOR for running git-cola-sequence-editor"""
-    xbase = unix_path(resources.command('git-cola-sequence-editor'))
-    if core.IS_WIN32:
+    path = resources.command('git-cola-sequence-editor')
+    xbase = unix_path(path)
+    if core.IS_WIN32 or is_python_script(path):
         editor = core.list2cmdline([unix_path(sys.executable), xbase])
     else:
         editor = core.list2cmdline([xbase])
     return editor
+
+
+def is_python_script(path: str) -> bool:
+    """Does the file start with a python shebang?
+
+    Python scripts run with the interpreter running cola rather than their
+    shebang. "#!/usr/bin/env python3" in the source tree can find a python
+    without Qt (e.g. macOS's /usr/bin/python3), and the absolute shebang pip
+    writes goes stale when a git-cola.app bundle is moved. Other launchers,
+    such as shell wrappers made by packagers, still run directly.
+    """
+    try:
+        with open(core.encode(path), 'rb') as script:
+            first_line = script.readline(256)
+    except OSError:
+        return False
+    return first_line.startswith(b'#!') and b'python' in first_line
 
 
 class SequenceEditorEnvironment:

@@ -1,5 +1,6 @@
 """Test the cmds module"""
 import os
+import sys
 import time
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from cola import cmds
+from cola import core
 
 from . import helper
 from .helper import app_context
@@ -407,3 +409,22 @@ def test_refresh_coalesces_a_burst_into_one_trailing_refresh(refresh_state):
 
     cmds.Refresh._flush()  # Nothing pending: a no-op.
     assert context.model.update_status.call_count == 2
+
+
+def test_sequence_editor_runs_python_scripts_with_this_python(tmp_path, monkeypatch):
+    """The shebang can find a python without Qt, or go stale in a moved bundle"""
+    script = tmp_path / 'git-cola-sequence-editor'
+    script.write_text('#!/usr/bin/env python3\nprint()\n')
+    monkeypatch.setattr(cmds.core, 'IS_WIN32', False)
+    monkeypatch.setattr(cmds.resources, 'command', lambda name: str(script))
+    expect = core.list2cmdline([cmds.unix_path(sys.executable), str(script)])
+    assert cmds.sequence_editor() == expect
+
+
+def test_sequence_editor_runs_wrappers_directly(tmp_path, monkeypatch):
+    """A packager's shell wrapper must not be handed to python"""
+    script = tmp_path / 'git-cola-sequence-editor'
+    script.write_text('#!/bin/sh\nexec python3 -m cola.sequenceeditor "$@"\n')
+    monkeypatch.setattr(cmds.core, 'IS_WIN32', False)
+    monkeypatch.setattr(cmds.resources, 'command', lambda name: str(script))
+    assert cmds.sequence_editor() == core.list2cmdline([str(script)])
