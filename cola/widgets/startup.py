@@ -6,6 +6,7 @@ from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
 from .. import cmds
+from .. import core
 from .. import display
 from .. import guicmds
 from .. import hotkeys
@@ -188,10 +189,13 @@ class StartupDialog(standard.Dialog):
             self.context.cfg.set_user('cola.startupmode', list_mode)
 
     def resize_widget(self):
-        width, height = qtutils.desktop_size()
+        rect = qtutils.desktop_rect()
+        width, height = rect.width(), rect.height()
+        # On macOS the area can start below the menu bar or on another display.
+        left, top = (rect.x(), rect.y()) if core.IS_DARWIN else (0, 0)
         self.setGeometry(
-            width // 4,
-            height // 4,
+            left + width // 4,
+            top + height // 4,
             width // 2,
             height // 2,
         )
