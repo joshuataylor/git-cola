@@ -128,6 +128,47 @@ def test_update_refs_reads_refs_itself(app_context):
     assert app_context.model.tags == ['test']
 
 
+def test_read_and_apply_status_matches_update_status(app_context):
+    """A background read applied later gives the same state as update_status()"""
+    helper.commit_files()
+    helper.run_git('tag', 'test')
+    helper.write_file('A', 'modified\n')
+    helper.touch('C')
+    model = app_context.model
+    query = model.status_query(update_index=True)
+    status = model.read_status(query)
+    assert model.modified == []  # Nothing changes until the result is applied.
+
+    assert model.is_current(query)
+    model.apply_status(status)
+    assert model.modified == ['A']
+    assert model.untracked == ['C']
+    assert model.tags == ['test']
+    assert model.local_branches == ['main']
+
+
+def test_status_read_is_stale_after_a_synchronous_update(app_context):
+    """A stage/unstage between the query and the result overtakes the read"""
+    helper.commit_files()
+    model = app_context.model
+    query = model.status_query()
+    model.update_file_status()
+    assert not model.is_current(query)
+
+
+def test_status_read_is_stale_after_a_mode_or_filter_change(app_context):
+    helper.commit_files()
+    model = app_context.model
+    query = model.status_query()
+    model.set_mode(model.mode_amend)
+    assert not model.is_current(query)
+
+    model.set_mode(model.mode_none)
+    query = model.status_query()
+    model.filter_paths = ['A']
+    assert not model.is_current(query)
+
+
 def test_remote_args_fetch(mock_context):
     """FETCH swaps arguments vs. PUSH and PULL"""
     (args, kwargs) = main.remote_args(
