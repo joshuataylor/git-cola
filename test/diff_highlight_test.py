@@ -100,3 +100,14 @@ def test_set_diff_highlights_once_with_intraline_spans(qapp, app_context):
     widget.set_diff(diff)
     assert widget.highlighter._intraline_spans
     assert calls == []
+
+
+def test_huge_diffs_skip_intraline_spans(qapp, app_context, monkeypatch):
+    from cola.widgets import diff as diff_module
+
+    monkeypatch.setattr(diff_module, 'INTRALINE_DIFF_MAX_LINES', 2)
+    widget, _calls = _diff_text_edit(app_context)
+    widget.set_diff(
+        '@@ -1 +1 @@\n-total = compute_total(items, tax=0.10)\n+total = compute_total(items, tax=0.15)\n'
+    )
+    assert widget.highlighter._intraline_spans == {}
