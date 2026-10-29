@@ -71,7 +71,6 @@ class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
     DIFF_HUNK_HEADER_RGX = re.compile(
         r'(?:@@ -[0-9,]+ \+[0-9,]+ @@)|(?:@@@ (?:-[0-9,]+ ){2}\+[0-9,]+ @@@)'
     )
-    BAD_WHITESPACE_RGX = re.compile(r'\s+$')
 
     def __init__(self, context, doc, whitespace=True, is_commit=False) -> None:
         QtGui.QSyntaxHighlighter.__init__(self, doc)
@@ -258,9 +257,11 @@ class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
         elif text.startswith('+'):
             formats.append((0, len_qt, self.diff_add_fmt))
             if self.whitespace:
-                match = self.BAD_WHITESPACE_RGX.search(text)
-                if match is not None:
-                    start = match.start()
+                # Trailing whitespace, found with rstrip(). Searching for
+                # r"\s+$" retries from every space, which is quadratic in long
+                # runs of spaces such as padded Markdown tables.
+                start = len(text.rstrip())
+                if start < len(text):
                     start_qt = qtutils.qt_index_from_codepoint(text, start)
                     formats.append(
                         (start_qt, len_qt - start_qt, self.bad_whitespace_fmt)
