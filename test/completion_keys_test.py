@@ -25,3 +25,22 @@ def test_other_keys_do_not_show_the_popup(monkeypatch):
     monkeypatch.setattr(completion.core, 'IS_DARWIN', False)
     assert not completion.is_popup_key(Qt.Key_Escape, Qt.AltModifier)
     assert not completion.is_popup_key(Qt.Key_Space, Qt.MetaModifier)
+
+
+def test_completer_skips_model_updates_while_its_popup_is_hidden():
+    """A status refresh must not rebuild completions nobody is looking at"""
+    from unittest.mock import MagicMock
+
+    model = MagicMock()
+    completer = completion.Completer.__new__(completion.Completer)
+    completer._model = model
+    popup = MagicMock()
+    completer.popup = lambda: popup
+
+    popup.isVisible.return_value = False
+    completer.update()
+    model.update.assert_not_called()
+
+    popup.isVisible.return_value = True
+    completer.update()
+    model.update.assert_called_once_with()
