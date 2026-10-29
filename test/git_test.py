@@ -469,3 +469,24 @@ def test_git_path_in_linked_worktree(tmp_path):
     # The default still prefers an existing path in the common git dir.
     actual = gitcmd.git_path('GIT_COLA_MSG')
     assert actual == str(repo / '.git' / 'GIT_COLA_MSG')
+
+
+def test_git_commands_run_in_a_new_session_without_preexec_fn(monkeypatch):
+    """SSH_ASKPASS needs a detached session; preexec_fn is fork-unsafe"""
+    from cola import git as git_module
+    from cola import operations_local
+
+    calls = []
+
+    def fake_run_command(cmd, **kwargs):
+        from cola import core
+
+        calls.append(kwargs)
+        return 0, core.decode(b''), core.decode(b'')
+
+    monkeypatch.setattr(git_module.os, 'setsid', lambda: None, raising=False)
+    ops = operations_local.LocalOperations()
+    monkeypatch.setattr(ops, 'run_command', fake_run_command)
+    git_module.Git.execute(['git', 'version'], ops, _cwd='/')
+    assert calls[0].get('start_new_session') is True
+    assert 'preexec_fn' not in calls[0]
