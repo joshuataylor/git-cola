@@ -1286,6 +1286,53 @@ def set_dialog_modality(dialog: QtWidgets.QWidget) -> None:
         dialog.setWindowModality(Qt.ApplicationModal)
 
 
+def add_window_menu(
+    window: QtWidgets.QMainWindow,
+    menubar: QtWidgets.QMenuBar,
+    before: QtWidgets.QMenu | None = None,
+    minimize_action: QtGui.QAction | None = None,
+) -> QtWidgets.QMenu:
+    """Add the standard macOS Window menu: Minimize, Zoom, Bring All to Front
+
+    Without it the standalone DAG had no Cmd+M at all, and neither window
+    offered Zoom or Bring All to Front where macOS users look for them.
+    """
+    menu = create_menu(N_('Window'), menubar)
+    if minimize_action is None:
+        minimize_action = add_action(
+            window, N_('Minimize Window'), window.showMinimized, hotkeys.MACOS_MINIMIZE
+        )
+    zoom_action = add_action(window, N_('Zoom'), lambda: toggle_zoom(window))
+    front_action = add_action(window, N_('Bring All to Front'), bring_all_to_front)
+    menu.addAction(minimize_action)
+    menu.addAction(zoom_action)
+    menu.addSeparator()
+    menu.addAction(front_action)
+    if before is None:
+        menubar.addMenu(menu)
+    else:
+        menubar.insertMenu(before.menuAction(), menu)
+    return menu
+
+
+def toggle_zoom(window: QtWidgets.QWidget) -> None:
+    """Zoom a window to fill the screen, or back, like the green button"""
+    if window.isMaximized():
+        window.showNormal()
+    else:
+        window.showMaximized()
+
+
+def bring_all_to_front() -> None:
+    """Raise every visible top-level window, keeping the active one on top"""
+    active = app().activeWindow()
+    for widget in app().topLevelWidgets():
+        if widget.isVisible() and widget.isWindow() and widget is not active:
+            widget.raise_()
+    if active is not None:
+        active.raise_()
+
+
 def keep_tool_window_visible(widget: QtWidgets.QWidget) -> None:
     """Keep a floating dock or toolbar on screen when another app is active
 

@@ -190,3 +190,32 @@ def test_dialog_modality_unchanged_elsewhere(qapp, monkeypatch):
     dialog = QtWidgets.QDialog(parent)
     qtutils.set_dialog_modality(dialog)
     assert dialog.windowModality() == Qt.ApplicationModal
+
+
+def test_window_menu_has_the_standard_macos_items(qapp):
+    window = QtWidgets.QMainWindow()
+    menubar = QtWidgets.QMenuBar(window)
+    help_menu = menubar.addMenu('Help')
+    menu = qtutils.add_window_menu(window, menubar, before=help_menu)
+    texts = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert texts == ['Minimize Window', 'Zoom', 'Bring All to Front']
+    assert menu.actions()[0].shortcut().toString() == 'Ctrl+M'
+    titles = [action.text() for action in menubar.actions()]
+    assert titles == ['Window', 'Help']
+
+
+def test_window_menu_reuses_an_existing_minimize_action(qapp):
+    window = QtWidgets.QMainWindow()
+    menubar = QtWidgets.QMenuBar(window)
+    minimize = qtutils.add_action(window, 'Minimize Window', window.showMinimized)
+    menu = qtutils.add_window_menu(window, menubar, minimize_action=minimize)
+    assert menu.actions()[0] is minimize
+
+
+def test_toggle_zoom(qapp):
+    window = QtWidgets.QMainWindow()
+    window.show()
+    qtutils.toggle_zoom(window)
+    assert window.isMaximized()
+    qtutils.toggle_zoom(window)
+    assert not window.isMaximized()

@@ -2468,6 +2468,8 @@ class GitDAG(standard.MainWindow):
         # On macOS the PreferencesRole moves this into the application menu.
         self.view_menu.addSeparator()
         self.view_menu.addAction(self.preferences_action)
+        if core.IS_DARWIN:
+            self.window_menu = qtutils.add_window_menu(self, self.menubar)
 
         left = Qt.LeftDockWidgetArea
         right = Qt.RightDockWidgetArea
