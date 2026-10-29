@@ -5,6 +5,7 @@ import pytest
 
 from cola import qtutils
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 
 @pytest.fixture(scope='module')
@@ -89,3 +90,10 @@ def test_add_action_keeps_the_heuristic_for_other_labels(qapp, text):
     widget = QtWidgets.QWidget()
     action = qtutils.add_action(widget, text, lambda: None)
     assert action.menuRole() == QtWidgets.QAction.TextHeuristicRole
+
+
+def test_create_dock_keeps_floating_docks_visible(qapp):
+    """Floating docks must not hide when another app is active on macOS"""
+    window = QtWidgets.QMainWindow()
+    dock = qtutils.create_dock('Diff', 'Diff', window)
+    assert dock.testAttribute(Qt.WA_MacAlwaysShowToolWindow)
