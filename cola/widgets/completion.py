@@ -574,6 +574,11 @@ class Completer(QtWidgets.QCompleter):
         self.setModel(model)
 
     def update(self):
+        # A status refresh would otherwise rebuild every candidate path, with
+        # its icon, on the GUI thread while nobody looks at the popup. Typing
+        # (set_match_text) and show_popup() update the matches when needed.
+        if not self.popup().isVisible():
+            return
         self._model.update()
 
     def dispose(self):
