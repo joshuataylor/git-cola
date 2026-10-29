@@ -79,7 +79,6 @@ class GravatarLabel(QtWidgets.QLabel):
         # a reply can identify its own email instead of relying on self.email,
         # which may have moved on to a newer selection.
         self.requested: dict[str, str] = {}
-        self._default_pixmap_bytes = None
         # The default icon, decoded once and reused, so cache-misses don't
         # re-decode PNG bytes on every commit.
         self._default_pixmap: QPixmap | None = None
@@ -125,7 +124,7 @@ class GravatarLabel(QtWidgets.QLabel):
         """
         if not prefs.enable_gravatar_cache(self.context):
             return False
-        entry = avatarcache.load(sha256_hexdigest(email), self.imgsize)
+        entry = avatarcache.load(sha256_hexdigest(email), self.physical_size())
         if entry is None:
             return False
         outcome, data = entry
@@ -137,7 +136,7 @@ class GravatarLabel(QtWidgets.QLabel):
                 avatarcache.remove(
                     avatarcache.entry_path(
                         sha256_hexdigest(email),
-                        self.imgsize,
+                        self.physical_size(),
                         avatarcache.AVATAR_SUFFIX,
                     )
                 )
@@ -153,7 +152,7 @@ class GravatarLabel(QtWidgets.QLabel):
 
     def request(self, email) -> None:
         if prefs.enable_gravatar(self.context):
-            url = Gravatar.url_for_email(email, self.imgsize)
+            url = Gravatar.url_for_email(email, self.physical_size())
             # A request for this email is already in flight; don't issue a
             # duplicate. The pending reply will repaint if still current.
             if url in self.requested:
@@ -164,21 +163,6 @@ class GravatarLabel(QtWidgets.QLabel):
             self.network.get(QtNetwork.QNetworkRequest(QtCore.QUrl(url)))
         else:
             self.pixmaps[email] = self.set_pixmap_from_default()
-
-    def default_pixmap_as_bytes(self) -> QByteArray:
-        if self._default_pixmap_bytes is None:
-            xres = self.imgsize
-            pixmap = icons.cola().pixmap(xres)
-            scaled_pixmap = pixmap.scaled(xres, xres)
-            byte_array = QtCore.QByteArray()
-            buf = QtCore.QBuffer(byte_array)
-            buf.open(QtCore.QIODevice.WriteOnly)
-            scaled_pixmap.save(buf, 'PNG')
-            buf.close()
-            self._default_pixmap_bytes = byte_array
-        else:
-            byte_array = self._default_pixmap_bytes
-        return byte_array
 
     def network_finished(self, reply: Any) -> None:
         # Identify the email from the reply's own request URL rather than
@@ -213,7 +197,7 @@ class GravatarLabel(QtWidgets.QLabel):
                 self.failed.pop(email, None)
                 if prefs.enable_gravatar_cache(self.context):
                     avatarcache.store_avatar(
-                        sha256_hexdigest(email), self.imgsize, response
+                        sha256_hexdigest(email), self.physical_size(), response
                     )
         else:
             # No avatar exists for this email (relocated to the default, or the
@@ -227,7 +211,9 @@ class GravatarLabel(QtWidgets.QLabel):
                 # written to disk: doing so would keep showing the default icon
                 # in later sessions for authors who do have an avatar.
                 if relocated and prefs.enable_gravatar_cache(self.context):
-                    avatarcache.store_miss(sha256_hexdigest(email), self.imgsize)
+                    avatarcache.store_miss(
+                        sha256_hexdigest(email), self.physical_size()
+                    )
 
         # Only repaint if this reply is for the email that is currently meant
         # to be displayed. A late reply for a previous author must not clobber
@@ -247,33 +233,55 @@ class GravatarLabel(QtWidgets.QLabel):
         pixmap.loadFromData(data)
         return pixmap
 
+    def device_pixel_ratio(self) -> float:
+        """Return the label's device pixel ratio (2.0 on a Retina display)"""
+        return self.devicePixelRatioF() or 1.0
+
+    def physical_size(self) -> int:
+        """Return the avatar size in device pixels
+
+        Avatars are requested, cached and decoded at this size and tagged
+        with the device pixel ratio. At the logical size they were upscaled,
+        and blurry, on a Retina display.
+        """
+        return round(self.imgsize * self.device_pixel_ratio())
+
     def _scale_to_imgsize(self, pixmap: QPixmap) -> QPixmap:
         """Scale a pixmap to the label's icon size with a smooth transform.
 
         Keeping every displayed pixmap the same size means swapping the default
         icon for a downloaded avatar (or one avatar for another) never resizes
         the label, avoiding the layout jump that reads as flicker. The avatar is
-        already roughly imgsize (requested via s=imgsize), so this is usually a
-        no-op or a minor adjustment.
+        already roughly the physical size (requested via s=), so this is
+        usually a no-op or a minor adjustment.
         """
         if pixmap.isNull():
             return pixmap
-        size = self.imgsize
-        if pixmap.width() == size and pixmap.height() == size:
-            return pixmap
-        return pixmap.scaled(
-            size,
-            size,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
+        size = self.physical_size()
+        if pixmap.width() != size or pixmap.height() != size:
+            pixmap = pixmap.scaled(
+                size,
+                size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        pixmap.setDevicePixelRatio(self.device_pixel_ratio())
+        return pixmap
 
     def default_pixmap(self) -> QPixmap:
         """Return the fallback git-cola icon, decoded once and reused"""
         if self._default_pixmap is None:
-            self._default_pixmap = self.pixmap_from_bytes(
-                self.default_pixmap_as_bytes()
-            )
+            # Render the icon at the display's resolution rather than via a
+            # 1x PNG, which came back at half resolution on Retina.
+            ratio = self.device_pixel_ratio()
+            icon = icons.cola()
+            try:
+                size = QtCore.QSize(self.imgsize, self.imgsize)
+                pixmap = icon.pixmap(size, ratio)
+            except TypeError:  # Qt5 has no devicePixelRatio overload
+                pixmap = icon.pixmap(self.physical_size())
+                pixmap.setDevicePixelRatio(ratio)
+            self._default_pixmap = pixmap
         return self._default_pixmap
 
     def set_pixmap_from_default(self) -> QPixmap:
