@@ -481,3 +481,33 @@ def test_default_pixmap_decoded_once(qapp):
     first = label.default_pixmap()
     second = label.default_pixmap()
     assert first is second
+
+
+def test_avatars_are_fetched_and_tagged_at_retina_resolution(qapp, monkeypatch):
+    """At a 2x device pixel ratio avatars are requested at twice the size"""
+    label = _make_label()
+    monkeypatch.setattr(label, 'device_pixel_ratio', lambda: 2.0)
+    assert label.physical_size() == label.imgsize * 2
+
+    label.request('retina@example.com')
+    request = label.network.get.call_args[0][0]
+    assert f's={label.imgsize * 2}&' in request.url().toString()
+
+    pixmap = label._scale_to_imgsize(
+        label.pixmap_from_bytes(_png_bytes(label.imgsize * 2))
+    )
+    assert pixmap.width() == label.imgsize * 2
+    assert pixmap.devicePixelRatio() == 2.0
+
+
+def test_default_avatar_is_rendered_at_retina_resolution(qapp, monkeypatch):
+    # The "icons:" search path only exists after full app initialisation, so
+    # stand in a real icon.
+    source = QtGui.QPixmap(256, 256)
+    source.fill(QtGui.QColor('orange'))
+    monkeypatch.setattr(gravatar.icons, 'cola', lambda: QtGui.QIcon(source))
+    label = _make_label()
+    monkeypatch.setattr(label, 'device_pixel_ratio', lambda: 2.0)
+    pixmap = label.default_pixmap()
+    assert pixmap.devicePixelRatio() == 2.0
+    assert pixmap.width() == label.imgsize * 2
