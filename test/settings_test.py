@@ -87,3 +87,40 @@ def test_rename_bookmark():
     expect = ['a', 'test', 'c']
     actual = [i['name'] for i in settings.bookmarks]
     assert expect == actual
+
+
+def test_recent_matches_the_same_repo_through_a_symlink(tmp_path, monkeypatch):
+    """/tmp/repo and /private/tmp/repo are one repository"""
+    real = tmp_path / 'real'
+    real.mkdir()
+    link = tmp_path / 'link'
+    link.symlink_to(real)
+    settings = Settings(verify=lambda path: True)
+    settings.values['recent'] = []
+    settings.add_recent(str(link), 8)
+    settings.add_recent(str(real), 8)
+    assert len(settings.recent) == 1
+
+
+def test_recent_ignores_case_on_macos(tmp_path, monkeypatch):
+    from cola import settings as settings_module
+
+    monkeypatch.setattr(settings_module.core, 'IS_DARWIN', True)
+    settings = Settings(verify=lambda path: True)
+    settings.values['recent'] = []
+    settings.add_recent(str(tmp_path / 'Repo'), 8)
+    settings.add_recent(str(tmp_path / 'repo'), 8)
+    assert len(settings.recent) == 1
+    settings.remove_recent(str(tmp_path / 'REPO'))
+    assert settings.recent == []
+
+
+def test_recent_keeps_case_distinct_elsewhere(tmp_path, monkeypatch):
+    from cola import settings as settings_module
+
+    monkeypatch.setattr(settings_module.core, 'IS_DARWIN', False)
+    settings = Settings(verify=lambda path: True)
+    settings.values['recent'] = []
+    settings.add_recent(str(tmp_path / 'Repo'), 8)
+    settings.add_recent(str(tmp_path / 'repo'), 8)
+    assert len(settings.recent) == 2
