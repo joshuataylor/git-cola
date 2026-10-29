@@ -113,3 +113,61 @@ def test_native_key_names_on_macos(monkeypatch):
 def test_native_key_names_elsewhere(monkeypatch):
     monkeypatch.setattr(qtutils.core, 'IS_DARWIN', False)
     assert qtutils.native_key_names('Ctrl + Alt + C') == 'Ctrl + Alt + C'
+
+
+class _FakeScreen:
+    def __init__(self, geometry, available):
+        self._geometry = geometry
+        self._available = available
+
+    def geometry(self):
+        return self._geometry
+
+    def availableGeometry(self):
+        return self._available
+
+
+def _fake_app(monkeypatch, pointer_screen):
+    from qtpy import QtCore
+
+    primary = _FakeScreen(
+        QtCore.QRect(0, 0, 1920, 1080), QtCore.QRect(0, 25, 1920, 980)
+    )
+
+    class App:
+        def primaryScreen(self):
+            return primary
+
+        def screenAt(self, _pos):
+            return pointer_screen
+
+    monkeypatch.setattr(qtutils, 'app', App)
+    return primary
+
+
+def test_desktop_rect_excludes_menu_bar_and_dock_on_macos(monkeypatch):
+    from qtpy import QtCore
+
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
+    _fake_app(monkeypatch, None)
+    assert qtutils.desktop_rect() == QtCore.QRect(0, 25, 1920, 980)
+    assert qtutils.desktop_size() == (1920, 980)
+
+
+def test_desktop_rect_uses_the_screen_under_the_pointer_on_macos(monkeypatch):
+    from qtpy import QtCore
+
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
+    other = _FakeScreen(
+        QtCore.QRect(1920, 0, 2560, 1440), QtCore.QRect(1920, 0, 2560, 1400)
+    )
+    _fake_app(monkeypatch, other)
+    assert qtutils.desktop_rect() == QtCore.QRect(1920, 0, 2560, 1400)
+
+
+def test_desktop_rect_unchanged_elsewhere(monkeypatch):
+    from qtpy import QtCore
+
+    monkeypatch.setattr(qtutils.core, 'IS_DARWIN', False)
+    _fake_app(monkeypatch, None)
+    assert qtutils.desktop_rect() == QtCore.QRect(0, 0, 1920, 1080)

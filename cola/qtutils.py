@@ -919,16 +919,37 @@ def app() -> QCoreApplication | None:
     return QtWidgets.QApplication.instance()
 
 
+def desktop_rect() -> QtCore.QRect:
+    """Return the desktop area that new windows are sized against
+
+    On macOS this is the available area -- without the menu bar and Dock --
+    of the screen under the pointer, which is where macOS opens new windows.
+    The full primary screen made first-run windows taller than the visible
+    area, so AppKit pushed the title bar down and the bottom went under the
+    Dock. Other platforms keep the primary screen's full geometry.
+    """
+    application = app()
+    if core.IS_DARWIN:
+        screen = application.screenAt(QtGui.QCursor.pos())
+        if screen is None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry()
+    return application.primaryScreen().geometry()
+
+
 def desktop_size() -> tuple[int, int]:
-    rect = app().primaryScreen().geometry()
+    rect = desktop_rect()
     return (rect.width(), rect.height())
 
 
 def center_on_screen(widget: QtWidgets.QWidget) -> None:
     """Move widget to the center of the default screen"""
-    width, height = desktop_size()
-    center_x = width // 2
-    center_y = height // 2
+    rect = desktop_rect()
+    center_x = rect.width() // 2
+    center_y = rect.height() // 2
+    if core.IS_DARWIN:
+        center_x += rect.x()
+        center_y += rect.y()
     widget.move(center_x - widget.width() // 2, center_y - widget.height() // 2)
 
 
