@@ -480,3 +480,16 @@ def test_select_all_and_refresh_keep_a_large_selection(widget):
     widget.refresh()
     assert widget.untracked() == kept
     assert widget.modified() == []
+
+
+def test_staging_a_gapped_selection_selects_the_next_file_after_the_first(widget):
+    """With gaps, the topmost staged file's next neighbour is selected, always
+
+    The old choice depended on the string hash seed through set iteration.
+    """
+    widget._model.set_contents(untracked=['a', 'b', 'c', 'd', 'e', 'f'])
+    widget.refresh()
+    _select_untracked(widget, ['b', 'e'], current='b')
+    _stage_untracked(widget, staged=['b', 'e'], remaining=['a', 'c', 'd', 'f'])
+    assert _selected_untracked(widget) == ['c']
+    assert widget.currentItem().text(0) == 'c'
