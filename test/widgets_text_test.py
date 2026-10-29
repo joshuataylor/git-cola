@@ -410,3 +410,24 @@ def test_cursor_position_skips_the_document_copy_without_listeners(qapp, monkeyp
     widget.setTextCursor(cursor)
     assert calls == []
 
+
+def test_log_appends_every_line_with_its_timestamp(qapp, monkeypatch):
+    """A long command output is inserted in one go, one prefixed line each"""
+    from unittest.mock import MagicMock
+
+    from cola.widgets import log
+
+    monkeypatch.setattr(log.time, 'strftime', lambda fmt: '2026-10-29 12:00:00:  ')
+    context = MagicMock()
+    context.cfg.get.side_effect = lambda key, default=None: default
+    widget = log.LogWidget(context, display_usage=False)
+    inserts = []
+    widget.output_text.document().contentsChange.connect(
+        lambda *args: inserts.append(args)
+    )
+    widget.append('first\nsecond\nthird')
+    prefix = '2026-10-29 12:00:00:  '
+    assert widget.output_text.toPlainText() == (
+        f'{prefix}first\n{prefix}second\n{prefix}third\n'
+    )
+    assert len(inserts) == 1
