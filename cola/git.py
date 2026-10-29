@@ -275,6 +275,7 @@ class Git:
         _encoding: str | None = None,
         _raw: bool = False,
         _stdin: int | None = None,
+        _input: bytes | None = None,
         _stderr: int | None = subprocess.PIPE,
         _stdout: int | None = subprocess.PIPE,
         _readonly: bool = False,
@@ -290,6 +291,7 @@ class Git:
         :param _readonly: avoid taking the index lock. Assume the command is read-only.
         :param _raw: do not strip trailing whitespace.
         :param _stdin: optional stdin filehandle.
+        :param _input: optional bytes to write to the command's stdin.
         :returns (status, out, err): exit status, stdout, stderr
 
         """
@@ -297,7 +299,11 @@ class Git:
         if not _cwd:
             _cwd = ops.getcwd()
 
-        extra = {}
+        extra: dict[str, Any] = {}
+        if _input is not None:
+            extra['input'] = _input
+            if _stdin is None:
+                _stdin = subprocess.PIPE
 
         if hasattr(os, 'setsid'):
             # SSH uses the SSH_ASKPASS variable only if the process is really
@@ -368,6 +374,7 @@ class Git:
             '_decode',
             '_encoding',
             '_stdin',
+            '_input',
             '_stdout',
             '_stderr',
             '_raw',
