@@ -34,6 +34,8 @@ class MonitorContext:
 
 
 class LocalOperations(IOperations):
+    accepts_input = True
+
     def __init__(self) -> None:
         self._monitor: Monitor = None
         self._monitor_state = {'files': False, 'config': False}

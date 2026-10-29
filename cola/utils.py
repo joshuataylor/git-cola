@@ -495,10 +495,13 @@ class Proxy:
         return getattr(self._obj, name)
 
 
-def slice_func(input_items: list[str], map_func: Callable) -> tuple[int, str, str]:
+def slice_func(
+    input_items: list[str], map_func: Callable, size: int | None = None
+) -> tuple[int, str, str]:
     """Slice input_items and call `map_func` over every slice
 
-    This exists because of "errno: Argument list too long"
+    This exists because of "errno: Argument list too long". `size` overrides
+    the number of items per slice, e.g. for items passed on stdin.
 
     """
     # This comment appeared near the top of include/linux/binfmts.h
@@ -526,7 +529,8 @@ def slice_func(input_items: list[str], map_func: Callable) -> tuple[int, str, st
     # 4K pages x 32 MAX_ARG_PAGES
     max_arg_len = (32 * 4096) // 4  # allow plenty of space for the environment
     max_filename_len = 256
-    size = max_arg_len // max_filename_len
+    if size is None:
+        size = max_arg_len // max_filename_len
 
     status = 0
     outs = []
