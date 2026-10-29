@@ -154,6 +154,10 @@ class BranchesTreeWidget(standard.TreeWidget):
         self._tree_states = None
         self._name_filter = ''
         self._tooltip_cache = {}
+        # What the current tree items were built from. Each model update
+        # refreshes the tree, and rebuilding thousands of refs takes tens of
+        # milliseconds, so an unchanged tree only refreshes its details.
+        self._built_from = None
 
         self.updated.connect(self.refresh, type=Qt.QueuedConnection)
         context.model.updated.connect(self.updated)
@@ -225,6 +229,17 @@ class BranchesTreeWidget(standard.TreeWidget):
             return
         model = self.context.model
         self.current_branch = model.currentbranch
+        built_from = (
+            tuple(model.local_branches),
+            tuple(model.remote_branches),
+            tuple(model.tags),
+            self._name_filter,
+            self.current_branch,
+        )
+        if built_from == self._built_from and self.topLevelItemCount():
+            self._update_branches()
+            return
+        self._built_from = built_from
 
         self._tree_states = self._save_tree_state()
         ellipsis = icons.ellipsis()
@@ -437,8 +452,12 @@ class BranchesTreeWidget(standard.TreeWidget):
             if behind > 0:
                 status_str += f'  {chr(0x2193)}{behind}'
 
+            # A tree kept from the last refresh still shows the old counts.
+            name = item.text(0).split('\t', 1)[0]
             if status_str:
-                item.setText(0, f'{item.text(0)}\t{status_str}')
+                item.setText(0, f'{name}\t{status_str}')
+            else:
+                item.setText(0, name)
         self._branch_details_in_progress = False
 
     def git_action_async(
