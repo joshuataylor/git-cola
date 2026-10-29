@@ -16,6 +16,7 @@ Main API:
 """
 from __future__ import annotations
 import difflib
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -433,6 +434,9 @@ def _paired_line_similarity(
 
     minus_cmp = minus_line_text.lstrip()
     plus_cmp = plus_line_text.lstrip()
+    if minus_cmp == minus_line_text and plus_cmp == plus_line_text:
+        # No leading whitespace: the same comparison again, on long lines.
+        return raw_ratio
     normalized_ratio = difflib.SequenceMatcher(None, minus_cmp, plus_cmp).ratio()
     return max(raw_ratio, normalized_ratio)
 
@@ -571,6 +575,9 @@ def _resolve_text_span_from_token_slice(
 #### Word tokenization helpers ####
 
 
+_ASCII_TOKEN_RE = re.compile(r'[0-9]+|[A-Za-z]+|.', re.DOTALL)
+
+
 def _tokenize_word_v1(text: str) -> list[TextToken]:
     r"""Tokenize `text` into lightweight "word-ish" chunks.
 
@@ -586,6 +593,15 @@ def _tokenize_word_v1(text: str) -> list[TextToken]:
         Tokens with character spans in `text` using Python slice
         coordinates [start, end).
     """
+    if text.isascii():
+        # The same runs, found by the regex engine. Only for ASCII text, where
+        # [0-9] is exactly str.isdigit(): a line of prose can be thousands of
+        # characters, and the loop below runs Python code for every one.
+        return [
+            TextToken(match.group(), TextSpan(match.start(), match.end()))
+            for match in _ASCII_TOKEN_RE.finditer(text)
+        ]
+
     tokens: list[TextToken] = []
 
     i = 0
