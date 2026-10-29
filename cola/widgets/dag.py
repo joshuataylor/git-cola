@@ -3267,7 +3267,16 @@ class Edge(QtWidgets.QGraphicsItem):
             color = EdgeColor.current()
             line = Qt.SolidLine
 
+        # Remembered so refresh_color() can follow a Light/Dark switch.
+        self.color_index = EdgeColor.current_color_index
         self.pen = QtGui.QPen(color, 2.0, line, Qt.SquareCap, Qt.RoundJoin)
+
+    def refresh_color(self):
+        """Re-pick this edge's color from the current EdgeColor set"""
+        color = QtGui.QColor(EdgeColor.colors[self.color_index % len(EdgeColor.colors)])
+        color.setAlpha(self.pen.color().alpha())
+        self.pen.setColor(color)
+        self.update()
 
     def recompute_bound(self):
         dest_pt = Commit.item_bbox.center()
@@ -3351,11 +3360,9 @@ class Edge(QtWidgets.QGraphicsItem):
         painter.drawPath(self.path)
 
 
-class EdgeColor:
-    """An edge color factory"""
-
-    current_color_index = 0
-    colors = [
+def _edge_base_colors():
+    """Return the edge colors shared by the light and dark sets"""
+    return [
         QtGui.QColor(Qt.red),
         QtGui.QColor(Qt.cyan),
         QtGui.QColor(Qt.magenta),
@@ -3364,19 +3371,30 @@ class EdgeColor:
         qtutils.rgba(0xFF, 0x66, 0x00),
     ]
 
+
+class EdgeColor:
+    """An edge color factory"""
+
+    current_color_index = 0
+    colors = _edge_base_colors()
+
     @classmethod
-    def update_colors(cls, theme):
-        """Update the colors based on the color theme"""
-        if theme.is_dark or theme.is_palette_dark:
-            cls.colors.extend([
+    def update_colors(cls, dark):
+        """Rebuild the colors for a dark or light background
+
+        The list is rebuilt rather than extended, so opening more DAG windows
+        or switching between Light and Dark never mixes the two sets.
+        """
+        if dark:
+            extra = [
                 QtGui.QColor(Qt.red).lighter(),
                 QtGui.QColor(Qt.cyan).lighter(),
                 QtGui.QColor(Qt.magenta).lighter(),
                 QtGui.QColor(Qt.green).lighter(),
                 QtGui.QColor(Qt.yellow).lighter(),
-            ])
+            ]
         else:
-            cls.colors.extend([
+            extra = [
                 QtGui.QColor(Qt.blue),
                 QtGui.QColor(Qt.darkRed),
                 QtGui.QColor(Qt.darkCyan),
@@ -3384,7 +3402,8 @@ class EdgeColor:
                 QtGui.QColor(Qt.darkGreen),
                 QtGui.QColor(Qt.darkYellow),
                 QtGui.QColor(Qt.darkBlue),
-            ])
+            ]
+        cls.colors = _edge_base_colors() + extra
 
     @classmethod
     def cycle(cls):
@@ -3681,9 +3700,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
     def __init__(self, context, parent):
         QtWidgets.QGraphicsView.__init__(self, parent)
         ViewerMixin.__init__(self)
-        EdgeColor.update_colors(context.app.theme)
-
         theme = context.app.theme
+        EdgeColor.update_colors(theme.is_dark or bool(theme.is_palette_dark))
         highlight = theme.selection_color()
         Commit.commit_selected_color = highlight
         Commit.selected_outline_color = highlight.darker()
@@ -3758,15 +3776,26 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
 
     def refresh_appearance(self) -> None:
         """Update palette-derived colors after a system appearance change."""
-        background_color = qtutils.css_color(
-            self.context.app.theme.background_color_rgb()
-        )
+        theme = self.context.app.theme
+        background_color = qtutils.css_color(theme.background_color_rgb())
         self.setBackgroundBrush(background_color)
+        # Read the darkness from the live palette: the theme object may not
+        # have been rebuilt yet.
+        palette_dark = self.palette().window().color().lightnessF() < 0.5
+        EdgeColor.update_colors(theme.is_dark or palette_dark)
+        for item in self.scene().items():
+            if isinstance(item, Edge):
+                item.refresh_color()
+        highlight = theme.selection_color()
+        Commit.commit_selected_color = highlight
+        Commit.selected_outline_color = highlight.darker()
         self.viewport().update()
 
     def changeEvent(self, event):
         if event.type() == QtCore.QEvent.PaletteChange:
-            self.refresh_appearance()
+            # Run after the application has rebuilt its theme for the new
+            # palette (App.refresh_system_appearance is also queued).
+            QtCore.QTimer.singleShot(0, self.refresh_appearance)
         super().changeEvent(event)
 
     def clear(self):

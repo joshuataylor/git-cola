@@ -1152,3 +1152,18 @@ def test_commit_find_escape_hides(qapp, app_context):
     assert not find.isVisible()
     assert QtWidgets.QApplication.focusWidget() is other
     window.close()
+
+
+def test_edge_colors_are_rebuilt_not_extended():
+    """Opening DAG windows or switching Light/Dark must not grow the list"""
+    from cola.widgets.dag import EdgeColor
+
+    EdgeColor.update_colors(dark=False)
+    light = [color.name() for color in EdgeColor.colors]
+    EdgeColor.update_colors(dark=False)
+    assert [color.name() for color in EdgeColor.colors] == light
+    EdgeColor.update_colors(dark=True)
+    dark = [color.name() for color in EdgeColor.colors]
+    assert dark != light
+    assert len(dark) < len(light) + 5
+    assert QtGui.QColor(Qt.darkBlue).name() not in dark
