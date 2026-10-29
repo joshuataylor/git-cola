@@ -1229,6 +1229,16 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
     def untracked_items(self):
         return qtutils.get_selected_items(self, UNTRACKED_IDX)
 
+    def changeEvent(self, event):
+        """Follow a Light/Dark switch for the bold header backgrounds"""
+        if event.type() == QtCore.QEvent.PaletteChange and prefs.bold_headers(
+            self.context
+        ):
+            brush = self.palette().midlight()
+            for idx in range(self.topLevelItemCount()):
+                self.topLevelItem(idx).setBackground(0, brush)
+        super().changeEvent(event)
+
     def copy(self):
         """Called by FocusProxy when Cmd+C / Ctrl+C is pressed."""
         copy_path(self.context)
