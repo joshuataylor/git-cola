@@ -225,3 +225,24 @@ def test_default_monospace_font_on_macos_has_a_bold_face(qapp, monkeypatch):
     monkeypatch.setattr(qtutils.core, 'IS_DARWIN', True)
     monkeypatch.setattr(qtutils.core, 'IS_WIN32', False)
     assert qtutils.default_monospace_font().family() == 'Menlo'
+
+
+@pytest.mark.parametrize(
+    ('text', 'index', 'expect'),
+    [
+        ('abc', 2, 2),
+        ('abc', 10, 3),
+        ('abc', 0, 0),
+        ('', 5, 0),
+        ('café!', 5, 5),  # BMP characters are one UTF-16 unit
+        ('a\U0001f600b', 2, 3),  # an emoji is a surrogate pair
+        ('a\U0001f600b', 3, 4),
+        ('x\ud800y', 3, 3),  # a lone surrogate still counts once
+    ],
+)
+def test_qt_index_from_codepoint(text, index, expect):
+    assert qtutils.qt_index_from_codepoint(text, index) == expect
+
+
+def test_qt_span_from_codepoint_after_an_emoji():
+    assert qtutils.qt_span_from_codepoint('\U0001f600 add', 2, 3) == (3, 3)
