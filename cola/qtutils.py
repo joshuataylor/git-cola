@@ -1273,6 +1273,19 @@ def native_key_names(text: str) -> str:
     return text
 
 
+def set_dialog_modality(dialog: QtWidgets.QWidget) -> None:
+    """Make a blocking dialog a sheet on macOS, application-modal elsewhere
+
+    A parented WindowModal dialog is a native sheet on macOS, attached to the
+    window it belongs to, as macOS expects for document-level questions.
+    Other platforms keep ApplicationModal.
+    """
+    if core.IS_DARWIN and dialog.parentWidget() is not None:
+        dialog.setWindowModality(Qt.WindowModal)
+    else:
+        dialog.setWindowModality(Qt.ApplicationModal)
+
+
 def keep_tool_window_visible(widget: QtWidgets.QWidget) -> None:
     """Keep a floating dock or toolbar on screen when another app is active
 

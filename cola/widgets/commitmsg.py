@@ -986,7 +986,7 @@ class CommitDateDialog(QtWidgets.QDialog):
         )
         self.setLayout(layout)
         self.setWindowTitle(N_('Set Commit Date'))
-        self.setWindowModality(Qt.ApplicationModal)
+        qtutils.set_dialog_modality(self)
 
         if commit_datetime is None:
             commit_datetime = self.tick_time(_get_latest_commit_datetime(context))
@@ -1176,7 +1176,7 @@ existing commit by that author (i.e. rev-list --all -i --author=<author>);"""
         )
         self.setLayout(layout)
         self.setWindowTitle(N_('Set Commit Author'))
-        self.setWindowModality(Qt.ApplicationModal)
+        qtutils.set_dialog_modality(self)
 
         self._apply_button.clicked.connect(self.accept)
         self._cancel_button.clicked.connect(self.reject)

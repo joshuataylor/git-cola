@@ -3,7 +3,6 @@ import os
 
 from qtpy import QtCore
 from qtpy import QtWidgets
-from qtpy.QtCore import Qt
 
 from .. import core
 from .. import gitcmds
@@ -60,7 +59,7 @@ class GitCommandWidget(standard.Dialog):
         standard.Dialog.__init__(self, parent)
         self.setWindowTitle(title)
         if parent is not None:
-            self.setWindowModality(Qt.ApplicationModal)
+            qtutils.set_dialog_modality(self)
 
         # Construct the process
         self.proc = QtCore.QProcess(self)
@@ -187,7 +186,7 @@ class ActionDialog(standard.Dialog):
         except KeyError:
             values = self.VALUES[name] = {}
 
-        self.setWindowModality(Qt.ApplicationModal)
+        qtutils.set_dialog_modality(self)
 
         title = opts.get('title')
         if title:
