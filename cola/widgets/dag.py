@@ -2526,6 +2526,10 @@ class GitDAG(standard.MainWindow):
         qtutils.add_close_action(self)
 
         self.set_params(params)
+        # Start with the keyboard on the commit list. Without this Qt gives
+        # focus to the first widget in the focus chain, the diff text, so the
+        # arrow keys scrolled the diff instead of moving between commits.
+        self.treewidget.setFocus()
 
     def set_params(self, params):
         context = self.context
