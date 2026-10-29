@@ -371,4 +371,4 @@ ctrl + s            save stash
 """
     )
     title = N_('Help')
-    return text.text_dialog(context, help_text, title)
+    return text.text_dialog(context, qtutils.native_key_names(help_text), title)

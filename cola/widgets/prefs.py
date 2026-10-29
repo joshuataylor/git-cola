@@ -524,7 +524,9 @@ class SettingsFormWidget(FormWidget):
 
         self.add_row('', QtWidgets.QLabel())
         self.add_row(N_('Save GUI Settings'), self.save_window_settings)
-        self.add_row(N_('Ctrl + MouseWheel to Zoom'), self.mouse_zoom)
+        self.add_row(
+            qtutils.native_key_names(N_('Ctrl + MouseWheel to Zoom')), self.mouse_zoom
+        )
         self.add_row(N_('Refresh on Focus'), self.refresh_on_focus)
         if core.IS_DARWIN:
             self.add_row(

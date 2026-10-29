@@ -175,14 +175,18 @@ class Editor(QtWidgets.QWidget):
 
         self.rebase_button = qtutils.create_button(
             text=core.getenv('GIT_COLA_SEQ_EDITOR_ACTION', N_('Rebase')),
-            tooltip=N_('Accept changes and rebase\nShortcut: Ctrl+Enter'),
+            tooltip=qtutils.native_key_names(
+                N_('Accept changes and rebase\nShortcut: Ctrl+Enter')
+            ),
             icon=icons.ok(),
             default=True,
         )
 
         self.extdiff_button = qtutils.create_button(
             text=N_('Launch Diff Tool'),
-            tooltip=N_('Launch external diff tool\nShortcut: Ctrl+D'),
+            tooltip=qtutils.native_key_names(
+                N_('Launch external diff tool\nShortcut: Ctrl+D')
+            ),
         )
         self.extdiff_button.setEnabled(False)
 
@@ -192,7 +196,7 @@ class Editor(QtWidgets.QWidget):
 
         self.cancel_button = qtutils.create_button(
             text=N_('Cancel'),
-            tooltip=N_('Cancel rebase\nShortcut: Ctrl+Q'),
+            tooltip=qtutils.native_key_names(N_('Cancel rebase\nShortcut: Ctrl+Q')),
             icon=icons.close(),
         )
 
@@ -987,4 +991,4 @@ ctrl+d     = launch difftool
 """
     )
     title = N_('Help - git-cola-sequence-editor')
-    return text.text_dialog(context, help_text, title)
+    return text.text_dialog(context, qtutils.native_key_names(help_text), title)
