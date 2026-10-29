@@ -1,4 +1,5 @@
 import platform
+import re
 import sys
 import webbrowser
 
@@ -522,6 +523,24 @@ def translators_text():
     return contributors_text(translators, prelude=prelude)
 
 
+def macos_hotkeys_html(html: str) -> str:
+    """Rewrite the shortcut table with the keys macOS actually uses
+
+    Qt's Ctrl is the Command key on macOS, but the dock "Focus tools" and
+    "Show and hide tools" shortcuts deliberately use the physical Control
+    key there (MainView.setup_dockwidget_view_menu), and Cmd+Space belongs
+    to Spotlight, so completion uses Option+Esc or Control+Space instead.
+    Alt is labelled Option on a Mac keyboard.
+    """
+    control = '\0CONTROL\0'
+    html = html.replace('Ctrl + Shift + #', control + ' + Shift + #')
+    html = html.replace('Ctrl + #', control + ' + #')
+    html = html.replace('Ctrl + Space', 'Option + Esc / ' + control + ' + Space')
+    html = html.replace('Ctrl', 'Cmd')
+    html = re.sub(r'\bAlt\b', 'Option', html)
+    return html.replace(control, 'Control')
+
+
 def show_shortcuts():
     hotkeys_html = resources.data_path(N_('hotkeys.html'))
     if core.IS_WIN32:
@@ -548,7 +567,7 @@ def show_shortcuts():
         with open(hotkeys_html, encoding='utf-8') as hotkeys_file:
             html = hotkeys_file.read()
         if core.IS_DARWIN:
-            html = html.replace('Ctrl', 'Cmd')
+            html = macos_hotkeys_html(html)
         web.setHtml(html)
     else:
         web.setUrl(QtCore.QUrl(hotkeys_url))
