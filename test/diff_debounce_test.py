@@ -47,37 +47,81 @@ def _make_widget(app_context):
     return widget
 
 
-def test_commits_selected_debounces_diff_load(qapp, app_context):
-    """Rapid selection changes only load the diff for the settled-on commit."""
+class _Clock:
+    """A controllable time.monotonic()"""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from cola.widgets import diff
+
+    fake = _Clock()
+    monkeypatch.setattr(diff.time, 'monotonic', fake)
+    return fake
+
+
+def test_commits_selected_debounces_diff_load(qapp, app_context, clock):
+    """A burst loads the first commit at once and the last once it settles."""
     widget = _make_widget(app_context)
 
     # Step through three commits faster than the debounce interval.
     for oid in ('a' * 40, 'b' * 40, 'c' * 40):
         widget.commits_selected([_make_commit(oid)])
+        clock.now += 0.03
 
-    # No diff task has been started yet -- only the timer is pending.
-    app_context.runtask.start.assert_not_called()
+    # The first selection after idle loaded at once; the rest are pending.
+    assert app_context.runtask.start.call_count == 1
     assert widget._pending_diff == ('oid', 'c' * 40)
+    assert widget._diff_timer.isActive()
     # Metadata still tracks the latest selection for immediate responsiveness.
     assert widget.oid == 'c' * 40
 
     # Fire the debounce as the event loop eventually would.
     widget._load_pending_diff()
-    assert app_context.runtask.start.call_count == 1
+    assert app_context.runtask.start.call_count == 2
     assert widget._pending_diff is None
 
 
-def test_empty_selection_cancels_pending_diff(qapp, app_context):
+def test_selection_after_a_pause_loads_without_waiting(qapp, app_context, clock):
+    """A single step does not wait out the debounce"""
+    widget = _make_widget(app_context)
+    widget.commits_selected([_make_commit('a' * 40)])
+    clock.now += 1.0
+    widget.commits_selected([_make_commit('b' * 40)])
+    assert app_context.runtask.start.call_count == 2
+    assert not widget._diff_timer.isActive()
+    assert widget._pending_diff is None
+
+
+def test_cached_diff_renders_immediately_after_a_pause(qapp, app_context, clock):
+    """Revisiting a cached commit renders synchronously, with no task"""
+    widget = _make_widget(app_context)
+    widget._render_diff = MagicMock()
+    widget._diff_cache[('a' * 40, None)] = 'cached diff'
+    widget.commits_selected([_make_commit('a' * 40)])
+    widget._render_diff.assert_called_once_with('cached diff')
+    app_context.runtask.start.assert_not_called()
+
+
+def test_empty_selection_cancels_pending_diff(qapp, app_context, clock):
     """Clearing the selection drops any pending diff load."""
     widget = _make_widget(app_context)
 
     widget.commits_selected([_make_commit('a' * 40)])
+    widget.commits_selected([_make_commit('b' * 40)])
     assert widget._pending_diff is not None
 
     widget.commits_selected([])
     assert widget._pending_diff is None
     assert not widget._diff_timer.isActive()
-    app_context.runtask.start.assert_not_called()
+    # Only the first, immediate load ran; the pending one was cancelled.
+    assert app_context.runtask.start.call_count == 1
 
 
 def test_set_diff_drops_superseded_result(qapp, app_context):

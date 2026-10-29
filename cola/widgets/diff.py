@@ -2400,6 +2400,9 @@ class CommitDiffWidget(QtWidgets.QWidget):
         self._diff_timer.setSingleShot(True)
         self._diff_timer.setInterval(self.DIFF_DEBOUNCE_MSEC)
         self._diff_timer.timeout.connect(self._load_pending_diff)
+        # time.monotonic() of the previous selection. The first selection after
+        # a pause loads at once; only a burst of selections is debounced.
+        self._last_selection = None
         # Monotonic token used to discard results from superseded diff tasks.
         # Each started task captures the current value; set_diff only applies a
         # result when its token still matches, so a slow diff that finishes
@@ -2593,8 +2596,22 @@ class CommitDiffWidget(QtWidgets.QWidget):
             self._pending_diff = ('oid', oid)
             self.oid_start = None
             self.oid_end = None
-        # (Re)start the debounce; the diff loads once the selection settles.
-        self._diff_timer.start()
+        if self._starts_burst():
+            # A single step or a revisit: load (or serve from cache) now
+            # instead of waiting out the debounce.
+            self._load_pending_diff()
+        else:
+            # (Re)start the debounce; the diff loads once the selection settles.
+            self._diff_timer.start()
+
+    def _starts_burst(self):
+        """Is this selection the first after a pause rather than part of a burst?"""
+        now = time.monotonic()
+        last = self._last_selection
+        self._last_selection = now
+        if self._diff_timer.isActive():
+            return False
+        return last is None or (now - last) * 1000.0 >= self.DIFF_DEBOUNCE_MSEC
 
     def _load_pending_diff(self):
         """Load the diff for the most recently selected commit(s)"""
