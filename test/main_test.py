@@ -187,3 +187,77 @@ def test_sort_bookmarks_config_reloads_built_favorites(main_view, monkeypatch):
     main_view._config_updated(None, prefs.SORT_BOOKMARKS, True)
 
     reload_bookmarks.assert_called_once_with()
+
+
+class _Recorder(QtWidgets.QLineEdit):
+    """A widget that records which FocusProxy operations reached it"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.calls = []
+
+    def paste(self):
+        self.calls.append('paste')
+
+    def undo(self):
+        self.calls.append('undo')
+
+
+def _focus_proxy(monkeypatch, darwin):
+    """An editor holding summary + description, plus a pane outside it"""
+    monkeypatch.setattr(main_widget.core, 'IS_DARWIN', darwin)
+    editor = QtWidgets.QWidget()
+    summary = _Recorder(editor)
+    description = _Recorder(editor)
+    pane = QtWidgets.QTreeWidget()
+    proxy = main_widget.FocusProxy(editor, summary, description)
+    return proxy, summary, description, pane
+
+
+def _set_focus(monkeypatch, widget):
+    app = MagicMock()
+    app.focusWidget.return_value = widget
+    monkeypatch.setattr(main_widget.qtutils, 'app', lambda: app)
+
+
+def test_focus_proxy_leaves_the_message_alone_from_other_panes_on_macos(
+    qapp, monkeypatch
+):
+    """Cmd+V in the status tree or diff must not paste into the summary"""
+    proxy, summary, description, pane = _focus_proxy(monkeypatch, darwin=True)
+    _set_focus(monkeypatch, pane)
+    proxy.paste()
+    assert summary.calls == [] and description.calls == []
+    assert proxy.focus('paste') is pane
+
+
+def test_focus_proxy_undo_message_still_targets_the_message_on_macos(qapp, monkeypatch):
+    proxy, summary, _description, pane = _focus_proxy(monkeypatch, darwin=True)
+    _set_focus(monkeypatch, pane)
+    proxy.undo()
+    assert summary.calls == ['undo']
+
+
+def test_focus_proxy_uses_the_focused_message_field(qapp, monkeypatch):
+    proxy, summary, description, _pane = _focus_proxy(monkeypatch, darwin=True)
+    _set_focus(monkeypatch, description)
+    proxy.paste()
+    assert description.calls == ['paste'] and summary.calls == []
+
+
+def test_focus_proxy_keeps_the_message_fallback_off_macos(qapp, monkeypatch):
+    """Elsewhere the Edit menu only fires on a click, so the fallback stays"""
+    proxy, summary, _description, pane = _focus_proxy(monkeypatch, darwin=False)
+    _set_focus(monkeypatch, pane)
+    proxy.paste()
+    assert summary.calls == ['paste']
+
+
+def test_focus_proxy_delete_never_edits_read_only_text(qapp, monkeypatch):
+    proxy, _summary, _description, _pane = _focus_proxy(monkeypatch, darwin=True)
+    viewer = QtWidgets.QPlainTextEdit()
+    viewer.setPlainText('diff text')
+    viewer.setReadOnly(True)
+    _set_focus(monkeypatch, viewer)
+    proxy.delete()
+    assert viewer.toPlainText() == 'diff text'

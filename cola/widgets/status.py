@@ -1233,6 +1233,13 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         """Called by FocusProxy when Cmd+C / Ctrl+C is pressed."""
         copy_path(self.context)
 
+    def cut(self):
+        """Called by FocusProxy on macOS, where Cmd+X arrives via Edit > Cut
+
+        It matches the tree's own Cmd+X / Ctrl+X shortcut (hotkeys.CUT).
+        """
+        copy_relpath(self.context)
+
     def show_selection(self):
         """Show the selected item."""
         context = self.context
