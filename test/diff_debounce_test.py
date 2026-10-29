@@ -109,6 +109,39 @@ def test_cached_diff_renders_immediately_after_a_pause(qapp, app_context, clock)
     app_context.runtask.start.assert_not_called()
 
 
+def test_prefetch_fills_the_cache_without_rendering(qapp, app_context, monkeypatch):
+    from cola.widgets import diff
+
+    widget = _make_widget(app_context)
+    widget._render_diff = MagicMock()
+    widget._diff_cache[('b' * 40, None)] = 'already cached'
+    token = widget._diff_token
+    fetched = []
+
+    def fake_diff_info(context, oid):
+        fetched.append(oid)
+        return 'diff of ' + oid[:1]
+
+    monkeypatch.setattr(diff.gitcmds, 'diff_info', fake_diff_info)
+    app_context.runtask.start.side_effect = lambda task, result: result(task.task())
+
+    widget.prefetch(['a' * 40, 'b' * 40, dag.WORKTREE, 'c' * 40])
+
+    assert fetched == ['a' * 40, 'c' * 40]
+    assert widget._diff_cache[('a' * 40, None)] == 'diff of a'
+    assert widget._diff_cache[('c' * 40, None)] == 'diff of c'
+    assert widget._diff_token == token
+    widget._render_diff.assert_not_called()
+
+
+def test_prefetch_after_a_cache_clear_is_discarded(qapp, app_context):
+    widget = _make_widget(app_context)
+    generation = widget._cache_generation
+    widget.clear_diff_cache()
+    widget._prefetched(generation, [('a' * 40, 'stale')])
+    assert not widget._diff_cache
+
+
 def test_empty_selection_cancels_pending_diff(qapp, app_context, clock):
     """Clearing the selection drops any pending diff load."""
     widget = _make_widget(app_context)

@@ -128,6 +128,33 @@ def test_selection_after_a_pause_loads_without_waiting(file_widget, clock):
     assert not widget._files_timer.isActive()
 
 
+def test_prefetch_fills_the_cache_without_listing(file_widget, monkeypatch):
+    from cola.widgets import filelist
+
+    widget, _qapp = file_widget
+    widget.list_files = MagicMock()
+    token = widget._files_token
+    monkeypatch.setattr(
+        filelist, 'gather_files', lambda context, key: ['1\t1\t' + key[1][:1]]
+    )
+    widget.context.runtask.start.side_effect = lambda task, result: result(task.task())
+
+    widget.prefetch(['a' * 40, dag.STAGE])
+
+    assert widget._files_cache[('oid', 'a' * 40)] == ['1\t1\ta']
+    assert ('oid', dag.STAGE) not in widget._files_cache
+    assert widget._files_token == token
+    widget.list_files.assert_not_called()
+
+
+def test_prefetch_after_a_cache_clear_is_discarded(file_widget):
+    widget, _qapp = file_widget
+    generation = widget._cache_generation
+    widget.clear_files_cache()
+    widget._prefetched(generation, [(('oid', 'a' * 40), ['x'])])
+    assert not widget._files_cache
+
+
 def test_stale_results_are_dropped(file_widget):
     """A result from a superseded load must not repopulate the list."""
     widget, _qapp = file_widget

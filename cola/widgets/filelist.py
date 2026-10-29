@@ -16,6 +16,11 @@ from ..models import dag
 from .standard import TreeWidget
 
 
+def prefetch_files(context, keys):
+    """Return (key, paths) pairs, as the file list's background task would"""
+    return [(key, gather_files(context, key)) for key in keys]
+
+
 def gather_files(context, key):
     """Return the paths changed by a commit or commit range
 
@@ -113,6 +118,9 @@ class FileWidget(TreeWidget):
         # time.monotonic() of the previous selection. The first selection after
         # a pause loads at once; only a burst of selections is debounced.
         self._last_selection = None
+        # Bumped when the cache is cleared, so a prefetch that finishes after a
+        # DAG reload cannot repopulate it with stale file lists.
+        self._cache_generation = 0
         self._columns_initialized = False
         # Guards _resize_columns() from mistaking its own section changes for a
         # manual drag, and records once the user has taken control of the widths.
@@ -241,16 +249,48 @@ class FileWidget(TreeWidget):
         if token != self._files_token:
             return
         if self._files_key_cacheable(key):
-            self._files_cache[key] = paths
-            self._files_cache.move_to_end(key)
-            while len(self._files_cache) > self._FILES_CACHE_MAX:
-                self._files_cache.popitem(last=False)
+            self._store_files(key, paths)
         self.list_files(paths)
+
+    def _store_files(self, key, paths):
+        """Insert a file list into the most-recently-used cache"""
+        self._files_cache[key] = paths
+        self._files_cache.move_to_end(key)
+        while len(self._files_cache) > self._FILES_CACHE_MAX:
+            self._files_cache.popitem(last=False)
 
     def clear_files_cache(self):
         """Drop cached file lists, e.g. when the DAG reloads its commits"""
         self._files_cache.clear()
         self._files_token += 1
+        self._cache_generation += 1
+
+    def prefetch(self, oids):
+        """Warm the file list cache for commits likely to be selected next
+
+        Runs in the background and only fills the cache: the list on display
+        and the staleness token are untouched.
+        """
+        keys = [
+            ('oid', oid)
+            for oid in oids
+            if self._files_key_cacheable(('oid', oid))
+            and ('oid', oid) not in self._files_cache
+        ]
+        if not keys:
+            return
+        task = qtutils.SimpleTask(prefetch_files, self.context, keys)
+        self.context.runtask.start(
+            task, result=partial(self._prefetched, self._cache_generation)
+        )
+
+    def _prefetched(self, generation, results):
+        """Store prefetched file lists unless the cache was cleared meanwhile"""
+        if generation != self._cache_generation:
+            return
+        for key, paths in results:
+            if key not in self._files_cache:
+                self._store_files(key, paths)
 
     def list_files(self, files_log):
         self.clear()
