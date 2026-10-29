@@ -1167,3 +1167,16 @@ def test_edge_colors_are_rebuilt_not_extended():
     assert dark != light
     assert len(dark) < len(light) + 5
     assert QtGui.QColor(Qt.darkBlue).name() not in dark
+
+
+def test_neighbour_rows_prefetch_ahead_in_the_direction_of_travel():
+    from cola.widgets.dag import neighbour_rows
+
+    # Moving down (or first selection): the next three rows, then one above.
+    assert neighbour_rows(10, None, 100) == [11, 12, 13, 9]
+    assert neighbour_rows(10, 9, 100) == [11, 12, 13, 9]
+    # Moving up: the three rows above, then one below.
+    assert neighbour_rows(10, 11, 100) == [9, 8, 7, 11]
+    # Clipped to the list.
+    assert neighbour_rows(0, None, 2) == [1]
+    assert neighbour_rows(0, 1, 2) == [1]

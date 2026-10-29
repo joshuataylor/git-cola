@@ -906,6 +906,23 @@ class GitDagLineEdit(completion.GitLogLineEdit):  # type: ignore[misc, valid-typ
         self.insert('--no-merges')
 
 
+PREFETCH_SETTLE_MSEC = 150
+"""How long the selection has to stay put before its neighbours are prefetched"""
+
+
+def neighbour_rows(row, previous_row, count, ahead=3, behind=1):
+    """Return the rows worth prefetching around row, most likely first
+
+    The next `ahead` rows in the direction of the last move (down, towards
+    older commits, unless the selection moved up), then `behind` rows the
+    other way. Rows outside 0..count-1 are skipped.
+    """
+    step = -1 if previous_row is not None and row < previous_row else 1
+    candidates = [row + step * offset for offset in range(1, ahead + 1)]
+    candidates += [row - step * offset for offset in range(1, behind + 1)]
+    return [idx for idx in candidates if 0 <= idx < count]
+
+
 GRAPH_ROW_ROLE = Qt.UserRole + 1
 GRAPH_PREV_ROW_ROLE = Qt.UserRole + 2
 COMMIT_ROLE = Qt.UserRole + 3
@@ -2256,6 +2273,14 @@ class GitDAG(standard.MainWindow):
         self.treewidget.verticalScrollBar().valueChanged.connect(
             lambda _value: self._signature_timer.start()
         )
+        # Once the selection settles, warm the diff and file list caches for
+        # the commits around it, so stepping on with the arrow keys renders
+        # from the cache instead of waiting for git.
+        self._prefetch_row = None
+        self._prefetch_timer = QtCore.QTimer(self)
+        self._prefetch_timer.setSingleShot(True)
+        self._prefetch_timer.setInterval(PREFETCH_SETTLE_MSEC)
+        self._prefetch_timer.timeout.connect(self.prefetch_neighbours)
         # closeEvent() is not delivered when the application quits out from
         # under a secondary window, so shutdown is caught here as well.
         app = QtWidgets.QApplication.instance()
@@ -2803,9 +2828,24 @@ class GitDAG(standard.MainWindow):
     def select_commits(self, commits):
         """Commits were selected"""
         self.selection = commits
+        self._prefetch_timer.start()
         enabled = bool(commits)
         for action in self.diffwidget_copy_actions:
             action.setEnabled(enabled)
+
+    def prefetch_neighbours(self):
+        """Prefetch the diffs and file lists of the commits around the selection"""
+        if len(self.selection) != 1:
+            return
+        tree = self.treewidget
+        row = tree.currentIndex().row()
+        if row < 0:
+            return
+        rows = neighbour_rows(row, self._prefetch_row, tree.topLevelItemCount())
+        self._prefetch_row = row
+        oids = [tree.topLevelItem(idx).commit.oid for idx in rows]
+        self.diffwidget.prefetch(oids)
+        self.filewidget.prefetch(oids)
 
     def clear(self):
         """Clear the view and the list of known commits"""
