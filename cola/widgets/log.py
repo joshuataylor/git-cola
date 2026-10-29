@@ -69,8 +69,9 @@ class LogWidget(QtWidgets.QFrame):
         text_widget = self.output_text
         # NOTE: the ':  ' colon-SP-SP suffix is for the syntax highlighter
         prefix = core.decode(time.strftime('%Y-%m-%d %H:%M:%S:  '))  # ISO-8601
-        for line in msg.split('\n'):
-            cursor.insertText(prefix + line + '\n')
+        # One insertion for the whole message: a command can print thousands
+        # of lines (e.g. "git reset" lists every modified path).
+        cursor.insertText(''.join(prefix + line + '\n' for line in msg.split('\n')))
         cursor.movePosition(QtGui.QTextCursor.End)
         text_widget.setTextCursor(cursor)
 
