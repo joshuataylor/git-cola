@@ -1,4 +1,5 @@
 import collections
+import time
 from functools import partial
 
 from qtpy import QtCore
@@ -109,6 +110,9 @@ class FileWidget(TreeWidget):
         self._files_timer.setSingleShot(True)
         self._files_timer.setInterval(self.FILES_DEBOUNCE_MSEC)
         self._files_timer.timeout.connect(self._load_pending_files)
+        # time.monotonic() of the previous selection. The first selection after
+        # a pause loads at once; only a burst of selections is debounced.
+        self._last_selection = None
         self._columns_initialized = False
         # Guards _resize_columns() from mistaking its own section changes for a
         # manual drag, and records once the user has taken control of the widths.
@@ -187,8 +191,22 @@ class FileWidget(TreeWidget):
         else:
             key = ('oid', commits[0].oid)
         self._pending_selection = key
-        # (Re)start the debounce; the files load once the selection settles.
-        self._files_timer.start()
+        if self._starts_burst():
+            # A single step or a revisit: load (or serve from cache) now
+            # instead of waiting out the debounce.
+            self._load_pending_files()
+        else:
+            # (Re)start the debounce; the files load once the selection settles.
+            self._files_timer.start()
+
+    def _starts_burst(self):
+        """Is this selection the first after a pause rather than part of a burst?"""
+        now = time.monotonic()
+        last = self._last_selection
+        self._last_selection = now
+        if self._files_timer.isActive():
+            return False
+        return last is None or (now - last) * 1000.0 >= self.FILES_DEBOUNCE_MSEC
 
     def _files_key_cacheable(self, key):
         """Return True when a selection key is safe to cache

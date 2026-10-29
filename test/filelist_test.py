@@ -83,23 +83,49 @@ def _commit(oid):
     return commit
 
 
-def test_selection_is_debounced(file_widget):
-    """Rapid selections coalesce into a single background load."""
+class _Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from cola.widgets import filelist
+
+    fake = _Clock()
+    monkeypatch.setattr(filelist.time, 'monotonic', fake)
+    return fake
+
+
+def test_selection_is_debounced(file_widget, clock):
+    """A burst loads the first commit at once and the last once it settles."""
     widget, _qapp = file_widget
 
-    widget.commits_selected([_commit('a' * 40)])
-    widget.commits_selected([_commit('b' * 40)])
-    widget.commits_selected([_commit('c' * 40)])
+    for oid in ('a' * 40, 'b' * 40, 'c' * 40):
+        widget.commits_selected([_commit(oid)])
+        clock.now += 0.03
 
-    # No git work happens on the selection path; the load is pending.
-    assert widget.context.runtask.start.call_count == 0
+    # The first selection after idle loaded at once; the rest are pending.
+    assert widget.context.runtask.start.call_count == 1
     assert widget._pending_selection == ('oid', 'c' * 40)
     assert widget._files_timer.isActive()
 
     widget._load_pending_files()
 
-    assert widget.context.runtask.start.call_count == 1
+    assert widget.context.runtask.start.call_count == 2
     assert widget._pending_selection is None
+
+
+def test_selection_after_a_pause_loads_without_waiting(file_widget, clock):
+    widget, _qapp = file_widget
+    widget.commits_selected([_commit('a' * 40)])
+    clock.now += 1.0
+    widget.commits_selected([_commit('b' * 40)])
+    assert widget.context.runtask.start.call_count == 2
+    assert not widget._files_timer.isActive()
 
 
 def test_stale_results_are_dropped(file_widget):
