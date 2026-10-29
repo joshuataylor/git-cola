@@ -27,6 +27,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import argparse
+import math
 import os
 import sys
 
@@ -335,12 +336,8 @@ class ImageView(QtWidgets.QGraphicsView):
             return
         roi_dims = QtCore.QPointF(roi.width(), roi.height())
         roi_topleft = roi.topLeft()
-        roi_scalef = 1.0
-
-        if zoom_level_delta > 0:
-            roi_scalef = 1.0 / self.zoom_factor
-        elif zoom_level_delta < 0:
-            roi_scalef = self.zoom_factor
+        # One step per wheel notch. Trackpads and pinches give fractions.
+        roi_scalef = self.zoom_factor**-zoom_level_delta
 
         nroi_dims = roi_dims * roi_scalef
         nroi_dims.setX(max(nroi_dims.x(), 1.0))
@@ -396,28 +393,33 @@ class ImageView(QtWidgets.QGraphicsView):
 
         if self.panning:
             end_drag = event.pos()
-            pan_vector = end_drag - self.start_drag
-            scene2view = self.transform()
-            # skip shear
-            sx = scene2view.m11()
-            sy = scene2view.m22()
-            scene_pan_x = pan_vector.x() / sx
-            scene_pan_y = pan_vector.y() / sy
-            scene_pan_vector = QtCore.QPointF(scene_pan_x, scene_pan_y)
-            roi = self.current_scene_ROI
-            top_left = roi.topLeft()
-            new_top_left = top_left - scene_pan_vector
-            scene_rect = self.sceneRect()
-            new_top_left.setX(
-                clamp(new_top_left.x(), scene_rect.left(), scene_rect.right())
-            )
-            new_top_left.setY(
-                clamp(new_top_left.y(), scene_rect.top(), scene_rect.bottom())
-            )
-            nroi = QtCore.QRectF(new_top_left, roi.size())
-            self.fitInView(nroi, Qt.KeepAspectRatio)
+            self.pan_by(end_drag - self.start_drag)
             self.start_drag = end_drag
         self.update()
+
+    def pan_by(self, pan_vector):
+        """Move the image by a vector in view (pixel) coordinates"""
+        roi = self.current_scene_ROI
+        if not roi:
+            return
+        scene2view = self.transform()
+        # skip shear
+        sx = scene2view.m11()
+        sy = scene2view.m22()
+        scene_pan_x = pan_vector.x() / sx
+        scene_pan_y = pan_vector.y() / sy
+        scene_pan_vector = QtCore.QPointF(scene_pan_x, scene_pan_y)
+        top_left = roi.topLeft()
+        new_top_left = top_left - scene_pan_vector
+        scene_rect = self.sceneRect()
+        new_top_left.setX(
+            clamp(new_top_left.x(), scene_rect.left(), scene_rect.right())
+        )
+        new_top_left.setY(
+            clamp(new_top_left.y(), scene_rect.top(), scene_rect.bottom())
+        )
+        nroi = QtCore.QRectF(new_top_left, roi.size())
+        self.fitInView(nroi, Qt.KeepAspectRatio)
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
@@ -441,15 +443,47 @@ class ImageView(QtWidgets.QGraphicsView):
         self.update()
 
     def wheelEvent(self, event):
+        """Zoom with a mouse wheel, pan with a trackpad, Cmd/Ctrl+scroll zooms
+
+        A trackpad sends a stream of small pixel deltas plus momentum, and
+        each event used to be a whole zoom step, so a two-finger scroll zoomed
+        far out of control and the image could not be scrolled at all.
+        """
+        pixels = event.pixelDelta()
+        precise = not pixels.isNull()
+        zoom_held = bool(event.modifiers() & Qt.ControlModifier)
+        if precise and not zoom_held:
+            self.pan_by(QtCore.QPointF(pixels))
+            self.update()
+            return
+        if precise and event.phase() == Qt.ScrollMomentum:
+            return
         delta = qtcompat.wheel_delta(event)
-        # adjust zoom
-        if abs(delta) > 0:
-            scene_pos = self.mapToScene(event.pos())
-            if delta >= 0:
-                sign = 1
-            else:
-                sign = -1
-            self.zoomROITo(scene_pos, sign)
+        if not delta:
+            return
+        # A notch is 120 units. Precise devices report less per event.
+        steps = delta / 120.0
+        if not precise:
+            steps = max(1.0, abs(steps)) * (1 if delta > 0 else -1)
+        self.zoomROITo(self.mapToScene(event.position().toPoint()), steps)
+
+    def event(self, event):
+        """Pinch to zoom on a trackpad"""
+        if (
+            event.type() == QtCore.QEvent.NativeGesture
+            and event.gestureType() == Qt.ZoomNativeGesture
+        ):
+            if hasattr(event, 'globalPosition'):
+                global_pos = event.globalPosition().toPoint()
+            else:  # Qt5
+                global_pos = event.globalPos()
+            point = self.mapFromGlobal(global_pos)
+            scale = 1.0 + event.value()
+            if scale > 0:
+                steps = math.log(scale) / math.log(self.zoom_factor)
+                self.zoomROITo(self.mapToScene(point), steps)
+            return True
+        return super().event(event)
 
     def reset(self):
         self.update_scene_rect()
