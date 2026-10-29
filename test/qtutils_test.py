@@ -246,3 +246,36 @@ def test_qt_index_from_codepoint(text, index, expect):
 
 def test_qt_span_from_codepoint_after_an_emoji():
     assert qtutils.qt_span_from_codepoint('\U0001f600 add', 2, 3) == (3, 3)
+
+
+def test_selected_values_match_a_scan_of_every_child(qapp):
+    """Reading the selection model gives what asking each child gave"""
+    import random
+
+    tree = QtWidgets.QTreeWidget()
+    tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+    sections = []
+    for section in range(4):
+        top = QtWidgets.QTreeWidgetItem([f'section {section}'])
+        tree.addTopLevelItem(top)
+        for child in range(30):
+            top.addChild(QtWidgets.QTreeWidgetItem([f'{section}/{child}']))
+        sections.append(top)
+    rng = random.Random(20261029)
+    for _ in range(50):
+        tree.clearSelection()
+        for top in sections:
+            for idx in range(top.childCount()):
+                if rng.random() < 0.2:
+                    top.child(idx).setSelected(True)
+            if rng.random() < 0.3:
+                top.setSelected(True)  # A selected header is not a child.
+        for idx, top in enumerate(sections):
+            # The values list can be shorter than the section (a stale model).
+            values = [f'value {i}' for i in range(rng.randint(20, 30))]
+            assert qtutils.get_selected_values(tree, idx, values) == (
+                qtutils.tree_selection(top, values)
+            )
+            assert qtutils.get_selected_items(tree, idx) == (
+                qtutils.tree_selection_items(top)
+            )
