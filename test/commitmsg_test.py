@@ -93,3 +93,21 @@ def test_unwrap_description_is_a_no_op_when_unchanged(commit_editor):
 
     assert 'already one line' == commit_editor.description.get()
     assert not commit_editor.description.document().isUndoAvailable()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_spelling_dictionary_preloads_only_when_spell_checking(enabled):
+    """The dictionary costs about 150 ms and 27 MB, so it waits until it is used"""
+    from cola.models import prefs
+
+    editor = CommitMessageEditor.__new__(CommitMessageEditor)
+    editor.context = MagicMock()
+    editor.context.cfg.get.side_effect = lambda key, default=None: (
+        enabled if key == prefs.SPELL_CHECK else default
+    )
+    editor.spellcheck = MagicMock()
+    editor._background_init()
+    if enabled:
+        editor.context.runtask.run.assert_called_once_with(editor.spellcheck.init)
+    else:
+        editor.context.runtask.run.assert_not_called()
