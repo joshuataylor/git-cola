@@ -165,6 +165,15 @@ def get_default_locale() -> str | None:
             lang = lang_system
         return lang
 
+    # macOS apps started from Finder or the Dock get no LANG at all, so the
+    # language chosen in System Settings has to be asked for.
+    if core.IS_DARWIN:
+        for lang in macos_preferred_languages():
+            if get_filename_for_locale(lang):
+                return lang
+            if lang.split('_', 1)[0] == 'en':
+                return None  # English is preferred over any translation.
+
     # Let python determine the locale.
     current_locale = get_current_locale()
     if get_filename_for_locale(current_locale):
@@ -172,6 +181,30 @@ def get_default_locale() -> str | None:
 
     # None means that the untranslated English string values will be used.
     return None
+
+
+def macos_preferred_languages() -> list[str]:
+    """Return the macOS preferred languages as gettext names, e.g. "de_DE"
+
+    Qt reads them from the user's System Settings through CFLocale, which
+    works before the QApplication exists.
+    """
+    try:
+        from qtpy import QtCore
+    except ImportError:
+        return []
+    result = []
+    for name in QtCore.QLocale.system().uiLanguages():
+        parts = name.replace('-', '_').split('_')
+        # Chinese comes with a script ("zh-Hans-CN"); cola ships zh_CN/zh_TW.
+        if parts[0] == 'zh' and len(parts) > 1 and parts[1] in ('Hans', 'Hant'):
+            parts = ['zh', 'CN' if parts[1] == 'Hans' else 'TW']
+        # Drop other script subtags: "de_Latn_DE" -> "de_DE".
+        parts = [part for part in parts if not (len(part) == 4 and part.istitle())]
+        lang = '_'.join(parts)
+        if lang not in result:
+            result.append(lang)
+    return result
 
 
 def get_current_locale() -> str:
