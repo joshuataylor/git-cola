@@ -789,6 +789,41 @@ def test_graph_node_tooltip_refreshes_only_after_materialisation(qapp, app_conte
         assert item.toolTip() == base + '\nSignature: Good'
 
 
+def _paint_centre(item):
+    """Paint a graph node into an image and return the colour at its centre"""
+    image = QtGui.QImage(40, 40, QtGui.QImage.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QtGui.QPainter(image)
+    painter.translate(20, 20)
+    option = QtWidgets.QStyleOptionGraphicsItem()
+    option.exposedRect = item.boundingRect()
+    item.paint(painter, option, None)
+    painter.end()
+    return image.pixelColor(20, 20).name()
+
+
+def test_graph_node_colours_follow_selection_and_appearance(qapp, app_context):
+    """Selected nodes use the current highlight, even after a Light/Dark switch"""
+    commit = _commit_for_graph(app_context, 'a' * 40)
+    scene = QtWidgets.QGraphicsScene()
+    item = GraphicsCommit(commit)
+    scene.addItem(item)
+    assert _paint_centre(item) == GraphicsCommit.commit_color.name()
+
+    original = GraphicsCommit.commit_selected_color
+    try:
+        GraphicsCommit.commit_selected_color = QtGui.QColor('#123456')
+        item.setSelected(True)
+        assert _paint_centre(item) == '#123456'
+        # A later appearance change reaches an already-selected node.
+        GraphicsCommit.commit_selected_color = QtGui.QColor('#654321')
+        assert _paint_centre(item) == '#654321'
+        item.setSelected(False)
+        assert _paint_centre(item) == GraphicsCommit.commit_color.name()
+    finally:
+        GraphicsCommit.commit_selected_color = original
+
+
 def test_model_updated_debounces_display(qapp, app_context):
     """A burst of model updates coalesces into a single display() pass"""
     win = GitDAG.__new__(GitDAG)

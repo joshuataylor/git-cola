@@ -3501,15 +3501,12 @@ class Commit(QtWidgets.QGraphicsItem):
         selectable=QtWidgets.QGraphicsItem.ItemIsSelectable,
         cursor=Qt.PointingHandCursor,
         xpos=commit_radius / 2.0 + 1.0,
-        cached_commit_color=commit_color,
-        cached_merge_color=merge_color,
     ):
         QtWidgets.QGraphicsItem.__init__(self)
 
         self.commit = commit
         self.selected = False
 
-        self.setZValue(0)
         self.setFlag(selectable)
         self.setCursor(cursor)
         # Tooltips are built lazily on hover (see GraphView.viewportEvent);
@@ -3523,10 +3520,7 @@ class Commit(QtWidgets.QGraphicsItem):
         else:
             self.label = None
 
-        if len(commit.parents) > 1:
-            self.brush = cached_merge_color
-        else:
-            self.brush = cached_commit_color
+        self.is_merge = len(commit.parents) > 1
 
         self.pressed = False
         self.dragged = False
@@ -3555,25 +3549,6 @@ class Commit(QtWidgets.QGraphicsItem):
             self._tooltip_set = False
             self.ensure_tooltip()
 
-    def itemChange(self, change, value):
-        if change == QtWidgets.QGraphicsItem.ItemSelectedHasChanged:
-            # Cache the pen for use in paint()
-            if value:
-                self.brush = self.commit_selected_color
-                color = self.selected_outline_color
-            else:
-                if len(self.commit.parents) > 1:
-                    self.brush = self.merge_color
-                else:
-                    self.brush = self.commit_color
-                color = self.outline_color
-            commit_pen = QtGui.QPen()
-            commit_pen.setWidth(1)
-            commit_pen.setColor(color)
-            self.commit_pen = commit_pen
-
-        return QtWidgets.QGraphicsItem.itemChange(self, change, value)
-
     def type(self):
         return self.item_type
 
@@ -3587,9 +3562,18 @@ class Commit(QtWidgets.QGraphicsItem):
         # Do not draw outside the exposed rectangle.
         painter.setClipRect(option.exposedRect)
 
-        # Draw ellipse
-        painter.setPen(self.commit_pen)
-        painter.setBrush(self.brush)
+        # The colours are picked here rather than cached on selection: an
+        # itemChange() override costs a Python call for every flag, cursor and
+        # position change of every node, and a cached colour would miss a
+        # Light/Dark switch.
+        if self.isSelected():
+            pen = QtGui.QPen(self.selected_outline_color)
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.setBrush(self.commit_selected_color)
+        else:
+            painter.setPen(self.commit_pen)
+            painter.setBrush(self.merge_color if self.is_merge else self.commit_color)
         painter.drawEllipse(self.inner_rect)
 
     def mousePressEvent(self, event):
