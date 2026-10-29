@@ -169,12 +169,23 @@ def icon_dir(theme: str) -> str:
     return icons
 
 
+def _xdg_dir(variable: str, default: str) -> str:
+    """Return an XDG base directory from the environment, else the default
+
+    The XDG spec treats an empty value as unset and a relative path as
+    invalid. Either would otherwise resolve against the current directory,
+    so cola wrote its settings into whichever repository it was started in.
+    """
+    value = core.getenv(variable, '')
+    if value and os.path.isabs(value):
+        return value
+    return default
+
+
 def xdg_config_home(*args) -> str:
     """Return the XDG_CONFIG_HOME configuration directory, eg. ~/.config"""
-    config = core.getenv(
-        'XDG_CONFIG_HOME', os.path.join(core.expanduser('~'), '.config')
-    )
-    return os.path.join(config, *args)
+    default = os.path.join(core.expanduser('~'), '.config')
+    return os.path.join(_xdg_dir('XDG_CONFIG_HOME', default), *args)
 
 
 def xdg_cache_home(*args) -> str:
@@ -188,10 +199,7 @@ def xdg_cache_home(*args) -> str:
         default = os.path.join(home, 'Library', 'Caches')
     else:
         default = os.path.join(home, '.cache')
-    # An empty $XDG_CACHE_HOME is treated as unset rather than as a relative
-    # path, which would scatter cache directories into the current directory.
-    cache = core.getenv('XDG_CACHE_HOME', '') or default
-    return os.path.join(cache, *args)
+    return os.path.join(_xdg_dir('XDG_CACHE_HOME', default), *args)
 
 
 def cache_home(*args) -> str:
@@ -201,10 +209,8 @@ def cache_home(*args) -> str:
 
 def xdg_data_home(*args) -> TextType:
     """Return the XDG_DATA_HOME configuration directory, e.g. ~/.local/share"""
-    config = core.getenv(
-        'XDG_DATA_HOME', os.path.join(core.expanduser('~'), '.local', 'share')
-    )
-    return os.path.join(config, *args)
+    default = os.path.join(core.expanduser('~'), '.local', 'share')
+    return os.path.join(_xdg_dir('XDG_DATA_HOME', default), *args)
 
 
 def xdg_data_dirs() -> list[TextType]:
