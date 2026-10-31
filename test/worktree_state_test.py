@@ -117,6 +117,31 @@ def test_untracked_files_and_directories_match(app_context):
     assert not any(path.startswith('ignored-dir') for path in files.untracked)
 
 
+def test_untracked_directories_split_across_calls_match(app_context, monkeypatch):
+    """Many collapsed directories are listed in chunks with the same result"""
+    _untracked()
+    for name in ('m', 'k', 'z', 'a'):
+        os.makedirs(f'more-{name}/inner')
+        helper.touch(f'more-{name}/inner/file', f'more-{name}/top')
+    calls = []
+    untracked_files = gitcmds.untracked_files
+
+    def spy(context, paths=None, **kwargs):
+        calls.append(paths)
+        return untracked_files(context, paths=paths, **kwargs)
+
+    monkeypatch.setattr(gitcmds, 'UNTRACKED_DIRS_PER_CALL', 2)
+    monkeypatch.setattr(gitcmds, 'untracked_files', spy)
+    files = _assert_same(app_context)
+    assert 'more-z/inner/file' in files.untracked
+    assert 'newdir/sub/deeper/c' in files.untracked
+    # Seven collapsed directories in sorted chunks of two (diff_files_state's
+    # own whole-tree call is the one without pathspecs).
+    chunks = [paths for paths in calls if paths]
+    assert [len(paths) for paths in chunks] == [2, 2, 2, 1]
+    assert chunks[0] == [':(literal)[glob-dir]*/', ':(literal)more-a/']
+
+
 def test_untracked_hidden_matches(app_context):
     _untracked()
     files = _assert_same(app_context, display_untracked=False)
