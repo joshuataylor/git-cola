@@ -48,6 +48,10 @@ OLD_PATHS_IDX = 1
 SELECTION_IDX = 2
 SELECT_FN_IDX = 3
 
+# QTreeView animates expand/collapse for 250 ms (QVariantAnimation's default).
+# Column resizes wait until it has finished.
+EXPAND_ANIMATION_MS = 300
+
 
 class StatusWidget(QtWidgets.QFrame):
     """
@@ -352,8 +356,14 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         )
         self.itemSelectionChanged.connect(self.show_selection)
         self.itemDoubleClicked.connect(cmds.run(cmds.StageOrUnstage, self.context))
-        self.itemCollapsed.connect(lambda x: self._update_column_widths())
-        self.itemExpanded.connect(lambda x: self._update_column_widths())
+        # resizeColumnToContents() measures up to 1000 rows, 25-50 ms with long
+        # paths. Running it from itemExpanded/itemCollapsed held back the
+        # animation's first frame by that much, so wait for the animation.
+        self._column_width_timer = QtCore.QTimer(self)
+        self._column_width_timer.setSingleShot(True)
+        self._column_width_timer.timeout.connect(self._update_column_widths)
+        self.itemCollapsed.connect(lambda x: self._schedule_column_widths())
+        self.itemExpanded.connect(lambda x: self._schedule_column_widths())
 
     def details_display_fn(self, parent):
         """Show details in a DiffTextEdit when confirming reverts"""
@@ -825,7 +835,13 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         return True
 
     def _update_column_widths(self):
+        self._column_width_timer.stop()
         self.resizeColumnToContents(0)
+
+    def _schedule_column_widths(self):
+        """Resize the column once an expand/collapse animation has finished"""
+        delay = EXPAND_ANIMATION_MS if self.isAnimated() else 0
+        self._column_width_timer.start(delay)
 
     def _expand_items(self, idx, items):
         """Expand the top-level category "folder" once and only once."""

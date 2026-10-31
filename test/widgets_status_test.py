@@ -493,3 +493,60 @@ def test_staging_a_gapped_selection_selects_the_next_file_after_the_first(widget
     _stage_untracked(widget, staged=['b', 'e'], remaining=['a', 'c', 'd', 'f'])
     assert _selected_untracked(widget) == ['c']
     assert widget.currentItem().text(0) == 'c'
+
+
+def _spy_column_resizes(widget):
+    """Record resizeColumnToContents() calls without measuring any rows"""
+    calls = []
+    widget.resizeColumnToContents = calls.append
+    return calls
+
+
+def test_expand_and_collapse_resize_the_column_after_the_animation(widget):
+    """Toggling a section waits for the animation before measuring rows
+
+    resizeColumnToContents() measures up to 1000 rows, which held back the
+    animation's first frame by 25-50 ms when it ran from itemExpanded.
+    """
+    widget._model.set_contents(modified=['m1'], untracked=['u1'])
+    widget.refresh()
+    calls = _spy_column_resizes(widget)
+    timer = widget._column_width_timer
+    header = widget.topLevelItem(status.MODIFIED_IDX)
+    assert widget.isAnimated()
+
+    header.setExpanded(False)
+    assert calls == []
+    assert timer.isActive()
+    assert timer.interval() == status.EXPAND_ANIMATION_MS
+
+    # A second toggle inside the window restarts the wait: one resize for both.
+    header.setExpanded(True)
+    assert calls == []
+    timer.timeout.emit()
+    assert calls == [0]
+
+
+def test_column_resize_after_toggle_skips_the_wait_without_animation(widget):
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    widget.setAnimated(False)
+    _spy_column_resizes(widget)
+
+    widget.topLevelItem(status.MODIFIED_IDX).setExpanded(False)
+    assert widget._column_width_timer.isActive()
+    assert widget._column_width_timer.interval() == 0
+
+
+def test_refresh_resizes_now_and_cancels_a_pending_resize(widget):
+    """A refresh that rebuilds a section resizes at once, not twice"""
+    widget._model.set_contents(modified=['m1'])
+    widget.refresh()
+    calls = _spy_column_resizes(widget)
+    widget.topLevelItem(status.MODIFIED_IDX).setExpanded(False)
+    assert widget._column_width_timer.isActive()
+
+    widget._model.set_contents(modified=['m1', 'a much longer path/to/m2'])
+    widget.refresh()
+    assert calls == [0]
+    assert not widget._column_width_timer.isActive()
