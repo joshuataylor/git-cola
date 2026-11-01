@@ -446,6 +446,17 @@ class ColaApplication:
         if self._app is not None:
             self._app.flush_pending_repo_paths()
 
+    def take_pending_repo_path(self) -> str | None:
+        """Remove and return the first repository FileOpen buffered, if any"""
+        if self._app is None:
+            return None
+        return self._app.take_pending_repo_path()
+
+    def set_startup_dialog(self, dialog) -> None:
+        """Send FileOpen repositories to the startup prompt while it is open"""
+        if self._app is not None:
+            self._app.startup_dialog = dialog
+
 
 def worktree_for_path(path: str) -> str | None:
     """Resolve a filesystem path delivered by macOS to a git worktree.
@@ -510,6 +521,9 @@ class ColaQApplication(QtWidgets.QApplication):
         # Repositories delivered by macOS FileOpen events before the main
         # window is ready are buffered here and opened once it exists.
         self._pending_repo_paths: list[str] = []
+        # The --prompt repository picker while it is open. A repository opened
+        # from Finder or the Dock at launch answers it.
+        self.startup_dialog = None
         # Resolved before the startup chdir into the worktree, while relative
         # arguments still resolve against the launch directory.
         self._launch_paths = launch_paths(argv)
@@ -526,9 +540,18 @@ class ColaQApplication(QtWidgets.QApplication):
             return
         context = self.context
         if context is None or context.view is None:
-            self._pending_repo_paths.append(worktree)
+            if self.startup_dialog is not None:
+                self.startup_dialog.open_path(worktree)
+            else:
+                self._pending_repo_paths.append(worktree)
         else:
             open_worktree(context, worktree)
+
+    def take_pending_repo_path(self) -> str | None:
+        """Remove and return the first buffered FileOpen repository, if any"""
+        if not self._pending_repo_paths:
+            return None
+        return self._pending_repo_paths.pop(0)
 
     def flush_pending_repo_paths(self) -> None:
         """Open any repositories buffered before the main window existed"""
@@ -887,9 +910,9 @@ def new_worktree(context: ApplicationContext, repo: str, prompt: bool) -> None:
     while not valid:
         # If we've gotten into this loop then that means that neither the
         # current directory nor the default repository were available.
-        # Prompt the user for a repository.
-        startup_dlg = startup.StartupDialog(context, parent)
-        gitdir = startup_dlg.find_git_repo()
+        # A repository opened from Finder or the Dock at launch ("Open With",
+        # a drop on the Dock icon) answers the prompt. Otherwise ask.
+        gitdir = _launch_repo_or_prompt(context, parent)
         if not gitdir:
             sys.exit(core.EXIT_NOINPUT)
 
@@ -906,6 +929,28 @@ def new_worktree(context: ApplicationContext, repo: str, prompt: bool) -> None:
                 message=N_(f'Could not open {gitdir}.'),
                 details=err,
             )
+
+
+def _launch_repo_or_prompt(context: ApplicationContext, parent) -> str | None:
+    """A repository FileOpen delivered at launch, or the user's choice
+
+    The app bundle starts with --prompt, and macOS delivers the repository
+    that launched it as a FileOpen event once the event loop runs, i.e.
+    while the picker is open. It used to wait for the main window, so the
+    picker showed first and the repository opened after whatever was picked.
+    """
+    cola_app = getattr(context, 'app', None)
+    if cola_app is None:
+        return startup.StartupDialog(context, parent).find_git_repo()
+    gitdir = cola_app.take_pending_repo_path()
+    if gitdir:
+        return gitdir
+    startup_dlg = startup.StartupDialog(context, parent)
+    cola_app.set_startup_dialog(startup_dlg)
+    try:
+        return startup_dlg.find_git_repo()
+    finally:
+        cola_app.set_startup_dialog(None)
 
 
 def offer_to_create_repo(context, gitdir) -> None:
