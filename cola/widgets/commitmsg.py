@@ -1239,6 +1239,11 @@ class CommitSummaryLineEdit(SpellCheckLineEdit):
     def __init__(self, context, check=None, parent=None):
         hint = N_('Commit summary')
         SpellCheckLineEdit.__init__(self, context, hint, check=check, parent=parent)
+        # Screen readers fall back to a generic "text" once the placeholder
+        # is gone. Summaries are terse and often start lower-case after an
+        # "area:" prefix, so input methods shouldn't predict or capitalise.
+        self.setAccessibleName(hint)
+        self.setInputMethodHints(Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase)
         self._comment_char = None
         self._refresh_config()
 
@@ -1286,6 +1291,7 @@ class CommitMessageTextEdit(SpellCheckTextEdit):
     def __init__(self, context, check=None, parent=None):
         hint = N_('Extended description...')
         SpellCheckTextEdit.__init__(self, context, hint, check=check, parent=parent)
+        self.setAccessibleName(N_('Extended description'))
 
         self.action_emit_leave = qtutils.add_action(
             self, 'Shift Tab', self.leave.emit, hotkeys.LEAVE

@@ -14,6 +14,7 @@ from cola.models import main as main_model
 from cola.widgets.commitmsg import CommitMessageEditor
 from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 from . import helper
 
@@ -111,3 +112,15 @@ def test_spelling_dictionary_preloads_only_when_spell_checking(enabled):
         editor.context.runtask.run.assert_called_once_with(editor.spellcheck.init)
     else:
         editor.context.runtask.run.assert_not_called()
+
+
+def test_message_fields_have_accessible_names(commit_editor):
+    """Screen readers name the fields once their placeholder text is gone"""
+    assert commit_editor.summary.accessibleName() == 'Commit summary'
+    assert commit_editor.description.accessibleName() == 'Extended description'
+
+
+def test_summary_asks_input_methods_not_to_predict_or_capitalise(commit_editor):
+    hints = commit_editor.summary.inputMethodHints()
+    assert hints & Qt.ImhNoPredictiveText
+    assert hints & Qt.ImhNoAutoUppercase
