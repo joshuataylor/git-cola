@@ -2664,11 +2664,15 @@ class CommitFindWidget(QtWidgets.QWidget):
         focus = QtWidgets.QApplication.focusWidget()
         if focus is not None and not self.isAncestorOf(focus):
             self._return_focus = focus
+        reopened = not self.isVisible()
         self.show()
         self.text.setFocus()
         self.text.selectAll()
         # hide_find() dropped git's matches: search again for the kept text.
-        if self.text.get():
+        # Cmd+F while the bar is open only refocuses it. Searching again then
+        # dropped git's matches until it finished, so with Only Matches their
+        # rows vanished, the selection with them, and came back moments later.
+        if reopened and self.text.get():
             self._matches = None
             self._schedule_git_search()
             self._refresh_view()
