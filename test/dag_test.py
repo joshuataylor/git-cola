@@ -1891,6 +1891,72 @@ def test_graph_edge_group_recolours_each_shared_pen_once(qapp, app_context):
     assert edge.pen.color().rgb() == expected.rgb()
 
 
+def _gesture_graph():
+    """A GraphView with a scene, for the wheel and gesture tests"""
+    from cola.widgets.dag import GraphView
+
+    view = GraphView.__new__(GraphView)
+    QtWidgets.QGraphicsView.__init__(view)
+    scene = QtWidgets.QGraphicsScene(view)
+    scene.setSceneRect(-5000, -5000, 10000, 10000)
+    view.setScene(scene)
+    view.resize(400, 300)
+    view.zoom = 1.0
+    return view
+
+
+def _wheel(pixel, angle, modifiers=Qt.NoModifier, phase=Qt.NoScrollPhase):
+    return QtGui.QWheelEvent(
+        QtCore.QPointF(200, 150),
+        QtCore.QPointF(200, 150),
+        QtCore.QPoint(*pixel),
+        QtCore.QPoint(*angle),
+        Qt.NoButton,
+        modifiers,
+        phase,
+        False,
+    )
+
+
+def test_graph_trackpad_scroll_pans_by_the_finger_distance(qapp):
+    """macOS reports angleDelta as twice pixelDelta for a trackpad"""
+    view = _gesture_graph()
+    view.wheelEvent(_wheel((0, 30), (0, 60)))
+    assert view.transform().dy() == 30
+    # A mouse wheel has no pixel delta and still pans by the angle.
+    view.wheelEvent(_wheel((0, 0), (0, 120)))
+    assert view.transform().dy() == 150
+
+
+def test_graph_ctrl_scroll_zooms_but_momentum_does_not(qapp):
+    view = _gesture_graph()
+    view.wheelEvent(_wheel((0, 30), (0, 60), Qt.ControlModifier, Qt.ScrollMomentum))
+    assert view.transform().m11() == 1.0
+    view.wheelEvent(_wheel((0, 30), (0, 256), Qt.ControlModifier, Qt.ScrollUpdate))
+    assert view.transform().m11() == pytest.approx(2**0.5)
+
+
+def test_graph_pinch_zooms_around_the_fingers(qapp):
+    view = _gesture_graph()
+    point = QtCore.QPointF(120, 80)
+    before = view.mapToScene(point.toPoint())
+    event = QtGui.QNativeGestureEvent(
+        Qt.ZoomNativeGesture,
+        QtGui.QPointingDevice.primaryPointingDevice(),
+        2,
+        point,
+        point,
+        point,
+        0.5,
+        QtCore.QPointF(),
+    )
+    assert view.viewportEvent(event)
+    assert view.transform().m11() == pytest.approx(1.5)
+    after = view.mapToScene(point.toPoint())
+    assert abs(after.x() - before.x()) <= 1
+    assert abs(after.y() - before.y()) <= 1
+
+
 def test_graph_layout_leaves_unmoved_nodes_and_their_edges_alone():
     from cola.widgets.dag import GraphView
 
