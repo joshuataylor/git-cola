@@ -2023,14 +2023,28 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         if count:
             self.select([self.topLevelItem(count - 1).commit.oid])
 
+    def go_head(self):
+        """Select the commit HEAD points at, when it is listed and shown"""
+        # oidmap also maps each ref name, HEAD included, to its commit's row.
+        item = self.oidmap.get('HEAD')
+        if item is None or item.isHidden():
+            return
+        self.select([item.commit.oid])
+
     def keyPressEvent(self, event):
-        """Cmd+Up/Cmd+Down select the first/last commit on macOS
+        """ "@" selects HEAD, Cmd+Up/Cmd+Down the first/last commit on macOS
 
         Qt treats Ctrl (Cmd) with the arrows as "move the focus without
         selecting", so the selection and diff stayed put. Other platforms keep
         that behaviour. macOS tags arrow keys with KeypadModifier, so ignore it.
         """
         modifiers = event.modifiers() & ~Qt.KeypadModifier
+        # "@" is git's name for HEAD. Match the typed text, so it works on any
+        # keyboard layout and whichever modifier the layout needs for it.
+        if event.text() == '@':
+            self.go_head()
+            event.accept()
+            return
         if core.IS_DARWIN and modifiers == Qt.ControlModifier:
             key = event.key()
             if key == Qt.Key_Up:
@@ -3012,6 +3026,11 @@ class GitDAG(standard.MainWindow):
         self.refresh_action = qtutils.add_action(
             self, N_('Refresh'), self.refresh, hotkeys.REFRESH
         )
+        # No shortcut here: a menu bar key equivalent would fire from every
+        # pane. "@" selects HEAD from the commit list (keyPressEvent).
+        self.select_head_action = qtutils.add_action(
+            self, N_('Select HEAD'), self.treewidget.go_head
+        )
         self.preferences_action = self._create_preferences_action()
 
         # Cmd+F finds commits from the commit list and the graph. The diff
@@ -3036,6 +3055,7 @@ class GitDAG(standard.MainWindow):
         # View Menu
         self.view_menu = qtutils.add_menu(N_('View'), self.menubar)
         self.view_menu.addAction(self.refresh_action)
+        self.view_menu.addAction(self.select_head_action)
         self.view_menu.addAction(self.display_inline_graph_action)
         self.view_menu.addAction(self.display_status_action)
         self.view_menu.addSeparator()

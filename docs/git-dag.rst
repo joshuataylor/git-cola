@@ -94,6 +94,8 @@ and then press `Ctrl-Alt-c` to copy sha1 or `Ctrl-d` to run diff tool.
 
 `Home` and `End` select the first and last commit in the commit list.
 On macOS `Cmd-Up` and `Cmd-Down` do the same.
+`@` (git's name for HEAD) selects the commit HEAD points at,
+as does "Select HEAD" in the View menu.
 
 You can read more about hotkeys from 'keyboard shortcuts' window or context menu.
 

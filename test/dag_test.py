@@ -931,6 +931,48 @@ def test_message_tooltip_is_for_the_hovered_row(qapp, app_context):
     tree.close()
 
 
+def _head_tree(app_context, head_row):
+    """A commit list of 6 commits whose row head_row is HEAD"""
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(6)]
+    # Rows are newest first, so row r shows commits[5 - r].
+    commits[5 - head_row].tags = ['HEAD', 'main']
+    tree = CommitTreeWidget(app_context, None)
+    tree.add_commits(commits)
+    return tree
+
+
+def _press_at(tree):
+    event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_At, Qt.ShiftModifier, '@')
+    tree.keyPressEvent(event)
+
+
+def test_at_selects_head(qapp, app_context):
+    """ "@" (git's name for HEAD) selects the commit HEAD points at"""
+    tree = _head_tree(app_context, head_row=3)
+    tree.go_top()
+    _press_at(tree)
+    head = tree.topLevelItem(3)
+    assert tree.selectedItems() == [head]
+    assert tree.currentItem() is head
+
+
+def test_at_leaves_the_selection_without_a_shown_head(qapp, app_context):
+    tree = CommitTreeWidget(app_context, None)
+    tree.add_commits(
+        [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(3)]
+    )
+    tree.go_top()
+    _press_at(tree)
+    assert tree.selectedItems() == [tree.topLevelItem(0)]
+
+    # HEAD filtered out by the find bar's Only Matches is not selected either.
+    tree = _head_tree(app_context, head_row=2)
+    tree.go_top()
+    tree.topLevelItem(2).setHidden(True)
+    tree.go_head()
+    assert tree.selectedItems() == [tree.topLevelItem(0)]
+
+
 def test_select_moves_the_current_row(qapp, app_context):
     """Selecting from the graph moves the list's current row and anchor"""
     tree = CommitTreeWidget(app_context, None)
