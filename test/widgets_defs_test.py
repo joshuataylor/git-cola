@@ -13,6 +13,7 @@ def test_metrics_for_darwin_uses_aqua_values():
         'group_spacing': 16,
         'button_row_spacing': 14,
         'inner_margin': 0,
+        'action_text': 11,
     }
 
 
@@ -27,6 +28,7 @@ def test_metrics_for_other_platforms_keep_legacy_values():
         assert metrics['group_spacing'] == 12
         assert metrics['button_row_spacing'] == 12
         assert metrics['inner_margin'] == 12
+        assert metrics['action_text'] == 10
 
 
 def test_module_constants_follow_sys_platform():
@@ -38,4 +40,5 @@ def test_module_constants_follow_sys_platform():
     assert defs.group_spacing == defs.scale(metrics['group_spacing'])
     assert defs.button_row_spacing == defs.scale(metrics['button_row_spacing'])
     assert defs.inner_margin == defs.scale(metrics['inner_margin'])
+    assert defs.action_text == defs.scale(metrics['action_text'])
     assert defs.native_dialog_buttons == (sys.platform == 'darwin')
