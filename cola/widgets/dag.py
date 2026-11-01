@@ -4109,55 +4109,179 @@ class Cache:
         return font
 
 
-class Edge(QtWidgets.QGraphicsItem):
-    item_type = qtutils.standard_item_type_value(1)
+def edge_path(source_x, source_y, dest_x, dest_y):
+    """The path of an edge from a parent at source to a child at dest"""
+    QRectF = QtCore.QRectF
+    QPointF = QtCore.QPointF
 
-    def __init__(self, source, dest):
-        QtWidgets.QGraphicsItem.__init__(self)
+    arc_rect = 10
+    connector_length = 5
 
-        self.setAcceptedMouseButtons(Qt.NoButton)
+    path = QtGui.QPainterPath()
+
+    if source_x == dest_x:
+        path.moveTo(source_x, source_y)
+        path.lineTo(dest_x, dest_y)
+        return path
+
+    # Define points starting from the source.
+    point1 = QPointF(source_x, source_y)
+    point2 = QPointF(point1.x(), point1.y() - connector_length)
+    point3 = QPointF(point2.x() + arc_rect, point2.y() - arc_rect)
+
+    # Define points starting from the destination.
+    point4 = QPointF(dest_x, dest_y)
+    point5 = QPointF(point4.x(), point3.y() - arc_rect)
+    point6 = QPointF(point5.x() - arc_rect, point5.y() + arc_rect)
+
+    start_angle_arc1 = 180
+    span_angle_arc1 = 90
+    start_angle_arc2 = 90
+    span_angle_arc2 = -90
+
+    # If the destination is at the left of the source, then we need to
+    # reverse some values.
+    if source_x > dest_x:
+        point3 = QPointF(point2.x() - arc_rect, point3.y())
+        point6 = QPointF(point5.x() + arc_rect, point6.y())
+
+        span_angle_arc1 = 90
+
+    path.moveTo(point1)
+    path.lineTo(point2)
+    path.arcTo(QRectF(point2, point3), start_angle_arc1, span_angle_arc1)
+    path.lineTo(point6)
+    path.arcTo(QRectF(point6, point5), start_angle_arc2, span_angle_arc2)
+    path.lineTo(point4)
+    return path
+
+
+def _item_xy(item):
+    pos = item.pos()
+    return pos.x(), pos.y()
+
+
+class Edge:
+    """An edge from a parent commit (source) to a child commit (dest)
+
+    Not a QGraphicsItem: an EdgeGroup draws a few hundred of them. Creating
+    one QGraphicsItem per edge took 0.48 s for the 67k edges of 50000
+    commits, and the scene then indexed and painted each one separately.
+    """
+
+    __slots__ = (
+        'source',
+        'dest',
+        'commit',
+        'group',
+        'pen',
+        'color_index',
+        'left',
+        'top',
+        'right',
+        'bottom',
+        'path',
+    )
+
+    def __init__(self, group, source, dest, source_xy=None, dest_xy=None):
+        self.group = group
         self.source = source
         self.dest = dest
         self.commit = source.commit
-        self.setZValue(-2)
-
-        self.recompute_bound()
         self.path = None
-        self.path_valid = False
+        if source_xy is None or dest_xy is None:
+            source_xy, dest_xy = _item_xy(source), _item_xy(dest)
+        self._set_bound(source_xy, dest_xy)
 
         # Choose a new color for new branch edges
-        if source.x() < dest.x():
+        if source_xy[0] < dest_xy[0]:
             color = EdgeColor.cycle()
         else:
             color = EdgeColor.current()
 
-        # Remembered so refresh_color() can follow a Light/Dark switch.
+        # Remembered so EdgeGroup.refresh_colors() can follow a Light/Dark switch.
         self.color_index = EdgeColor.current_color_index
         self.pen = EdgeColor.pen(color)
 
-    def refresh_color(self):
-        """Re-pick this edge's color from the current EdgeColor set
-
-        Edges of one color share a pen, so this recolors all of them.
-        """
-        color = QtGui.QColor(EdgeColor.colors[self.color_index % len(EdgeColor.colors)])
-        color.setAlpha(self.pen.color().alpha())
-        self.pen.setColor(color)
-        self.update()
-
     def recompute_bound(self):
-        # Commit shapes are centred on the commit's position and edges have no
+        self._set_bound(_item_xy(self.source), _item_xy(self.dest))
+
+    def _set_bound(self, source_xy, dest_xy):
+        # Commit shapes are centred on the commit's position and nodes have no
         # parent or transform, so the end points are the commits' positions.
-        self.bound = QtCore.QRectF(self.source.pos(), self.dest.pos()).normalized()
+        source_x, source_y = source_xy
+        dest_x, dest_y = dest_xy
+        self.left = min(source_x, dest_x)
+        self.right = max(source_x, dest_x)
+        self.top = min(source_y, dest_y)
+        self.bottom = max(source_y, dest_y)
 
     def commits_were_invalidated(self):
+        """A commit moved: recompute the bounds now and the path when painted"""
         self.recompute_bound()
-        self.prepareGeometryChange()
-        # The path should not be recomputed immediately because just small part
-        # of DAG is actually shown at same time. It will be recomputed on
-        # demand in course of 'paint' method.
-        self.path_valid = False
-        # Hence, just queue redrawing.
+        self.path = None
+        self.group.edge_moved()
+
+    def get_path(self):
+        path = self.path
+        if path is None:
+            source = self.source.pos()
+            dest = self.dest.pos()
+            path = edge_path(source.x(), source.y(), dest.x(), dest.y())
+            self.path = path
+        return path
+
+
+# Edges drawn by each EdgeGroup scene item.
+EDGES_PER_GROUP = 256
+
+
+class EdgeGroup(QtWidgets.QGraphicsItem):
+    """Draw the edges of a run of commits as one scene item
+
+    Paints only the edges that cross the exposed area, and never takes
+    mouse input or turns up in itemAt(): its shape is empty.
+    """
+
+    item_type = qtutils.standard_item_type_value(1)
+
+    def __init__(self):
+        QtWidgets.QGraphicsItem.__init__(self)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setFlag(QtWidgets.QGraphicsItem.ItemUsesExtendedStyleOption)
+        self.setZValue(-2)
+        self.edges = []
+        self._bound = QtCore.QRectF()
+        self._dirty = True
+
+    def add_edge(self, source, dest, source_xy=None, dest_xy=None):
+        """Add an edge from source to dest, both already laid out"""
+        edge = Edge(self, source, dest, source_xy, dest_xy)
+        self.edges.append(edge)
+        return edge
+
+    def edge_moved(self):
+        """One of the edges moved: recompute the bounds before the next use"""
+        if not self._dirty:
+            self.prepareGeometryChange()
+            self._dirty = True
+        self.update()
+
+    def refresh_colors(self):
+        """Re-pick the edge colors from the current EdgeColor set
+
+        Edges of one color share a pen, so each pen is recolored once.
+        """
+        seen = set()
+        colors = EdgeColor.colors
+        for edge in self.edges:
+            pen = edge.pen
+            if id(pen) in seen:
+                continue
+            seen.add(id(pen))
+            color = QtGui.QColor(colors[edge.color_index % len(colors)])
+            color.setAlpha(pen.color().alpha())
+            pen.setColor(color)
         self.update()
 
     # Qt overrides
@@ -4165,59 +4289,45 @@ class Edge(QtWidgets.QGraphicsItem):
         return self.item_type
 
     def boundingRect(self):
-        return self.bound
+        if self._dirty:
+            edges = self.edges
+            if edges:
+                left = min(edge.left for edge in edges)
+                top = min(edge.top for edge in edges)
+                right = max(edge.right for edge in edges)
+                bottom = max(edge.bottom for edge in edges)
+                # Room for the pen and the arcs' overhang.
+                self._bound = QtCore.QRectF(
+                    left - 12, top - 12, right - left + 24, bottom - top + 24
+                )
+            else:
+                self._bound = QtCore.QRectF()
+            self._dirty = False
+        return self._bound
 
-    def recompute_path(self):
-        QRectF = QtCore.QRectF
-        QPointF = QtCore.QPointF
+    def shape(self):
+        return QtGui.QPainterPath()
 
-        arc_rect = 10
-        connector_length = 5
-
-        path = QtGui.QPainterPath()
-
-        if self.source.x() == self.dest.x():
-            path.moveTo(self.source.x(), self.source.y())
-            path.lineTo(self.dest.x(), self.dest.y())
-        else:
-            # Define points starting from the source.
-            point1 = QPointF(self.source.x(), self.source.y())
-            point2 = QPointF(point1.x(), point1.y() - connector_length)
-            point3 = QPointF(point2.x() + arc_rect, point2.y() - arc_rect)
-
-            # Define points starting from the destination.
-            point4 = QPointF(self.dest.x(), self.dest.y())
-            point5 = QPointF(point4.x(), point3.y() - arc_rect)
-            point6 = QPointF(point5.x() - arc_rect, point5.y() + arc_rect)
-
-            start_angle_arc1 = 180
-            span_angle_arc1 = 90
-            start_angle_arc2 = 90
-            span_angle_arc2 = -90
-
-            # If the destination is at the left of the source, then we need to
-            # reverse some values.
-            if self.source.x() > self.dest.x():
-                point3 = QPointF(point2.x() - arc_rect, point3.y())
-                point6 = QPointF(point5.x() + arc_rect, point6.y())
-
-                span_angle_arc1 = 90
-
-            path.moveTo(point1)
-            path.lineTo(point2)
-            path.arcTo(QRectF(point2, point3), start_angle_arc1, span_angle_arc1)
-            path.lineTo(point6)
-            path.arcTo(QRectF(point6, point5), start_angle_arc2, span_angle_arc2)
-            path.lineTo(point4)
-
-        self.path = path
-        self.path_valid = True
-
-    def paint(self, painter, _option, _widget):
-        if not self.path_valid:
-            self.recompute_path()
-        painter.setPen(self.pen)
-        painter.drawPath(self.path)
+    def paint(self, painter, option, _widget):
+        exposed = option.exposedRect
+        # Paths bend up to 10 px outside the line between their end points.
+        left = exposed.left() - 12
+        top = exposed.top() - 12
+        right = exposed.right() + 12
+        bottom = exposed.bottom() + 12
+        pen = None
+        for edge in self.edges:
+            if (
+                edge.right < left
+                or edge.left > right
+                or edge.bottom < top
+                or edge.top > bottom
+            ):
+                continue
+            if edge.pen is not pen:
+                pen = edge.pen
+                painter.setPen(pen)
+            painter.drawPath(edge.get_path())
 
 
 def _edge_base_colors():
@@ -4572,6 +4682,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.items = {}
         self._selected_oids = frozenset()
         """The oids this graph shows as selected, to skip the echo of its own selection"""
+        self.positions = {}
+        """oid -> (x, y) from the last layout_commits()"""
         self.mouse_start = [0, 0]
         self.saved_matrix = self.transform()
         self.max_column = 0
@@ -4646,8 +4758,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         palette_dark = self.palette().window().color().lightnessF() < 0.5
         EdgeColor.update_colors(theme.is_dark or palette_dark)
         for item in self.scene().items():
-            if isinstance(item, Edge):
-                item.refresh_color()
+            if isinstance(item, EdgeGroup):
+                item.refresh_colors()
         highlight = theme.selection_color()
         Commit.commit_selected_color = highlight
         Commit.selected_outline_color = highlight.darker()
@@ -4665,6 +4777,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.scene().clear()
         self.scene().invalidate()
         self.items.clear()
+        self.positions = {}
         self.x_offsets.clear()
         self.x_min = 24
         self.commits = []
@@ -4976,6 +5089,9 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
     def link(self, commits):
         """Create edges linking commits with their parents"""
         scene = self.scene()
+        # The layout's positions, so edges don't ask each node for its pos().
+        positions = self.positions
+        group = None
         for commit in commits:
             try:
                 commit_item = self.items[commit.oid]
@@ -4986,18 +5102,27 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
                     parent_item = self.items[parent.oid]
                 except KeyError:
                     continue  # The history is truncated.
-                try:
-                    edge = parent_item.edges[commit.oid]
-                except KeyError:
-                    edge = Edge(parent_item, commit_item)
-                else:
+                if commit.oid in parent_item.edges:
                     continue
+                # Commits arrive in order, so a group's edges are close together.
+                if group is None or len(group.edges) >= EDGES_PER_GROUP:
+                    if group is not None:
+                        scene.addItem(group)
+                    group = EdgeGroup()
+                edge = group.add_edge(
+                    parent_item,
+                    commit_item,
+                    positions.get(parent.oid),
+                    positions.get(commit.oid),
+                )
                 parent_item.edges[commit.oid] = edge
                 commit_item.edges[parent.oid] = edge
-                scene.addItem(edge)
+        if group is not None:
+            scene.addItem(group)
 
     def layout_commits(self):
         positions = self.position_nodes()
+        self.positions = positions
 
         # Each edge is accounted in two commits. Hence, accumulate invalid
         # edges to prevent double edge invalidation.

@@ -1959,6 +1959,111 @@ def test_inline_graph_paints_every_lane_in_its_colour(qapp):
     assert checked >= 4
 
 
+class _Node:
+    """Enough of a graph Commit node for edges: a position, a commit, edges"""
+
+    def __init__(self, commit, x_val, y_val):
+        self.commit = commit
+        self.edges = {}
+        self.point = QtCore.QPointF(x_val, y_val)
+
+    def pos(self):
+        return self.point
+
+    def x(self):
+        return self.point.x()
+
+
+def _graph_with_nodes(app_context, coordinates):
+    """A GraphView holding fake nodes for linear commits at the coordinates"""
+    from cola.widgets.dag import GraphView
+
+    view = GraphView.__new__(GraphView)
+    QtWidgets.QGraphicsView.__init__(view)
+    view.setScene(QtWidgets.QGraphicsScene(view))
+    commits = []
+    parent = None
+    for idx in range(len(coordinates)):
+        parent = _commit_for_graph(
+            app_context, f'{idx:040x}', parents=[parent] if parent else None
+        )
+        commits.append(parent)
+    view.items = {
+        commit.oid: _Node(commit, *xy) for commit, xy in zip(commits, coordinates)
+    }
+    view.positions = {commit.oid: xy for commit, xy in zip(commits, coordinates)}
+    return view, commits
+
+
+def test_graph_edges_are_drawn_by_a_few_group_items(qapp, app_context, monkeypatch):
+    """67k edges as separate scene items took 0.48 s to create for 50000 commits"""
+    from cola.widgets import dag as dag_widgets
+
+    monkeypatch.setattr(dag_widgets, 'EDGES_PER_GROUP', 4)
+    coordinates = [(0.0, -50.0 * idx) for idx in range(10)]
+    view, commits = _graph_with_nodes(app_context, coordinates)
+    view.link(commits)
+
+    groups = view.scene().items()
+    assert len(groups) == 3  # nine edges in groups of four
+    assert all(isinstance(group, dag_widgets.EdgeGroup) for group in groups)
+    first, second = view.items[commits[0].oid], view.items[commits[1].oid]
+    assert first.edges[commits[1].oid] is second.edges[commits[0].oid]
+    # Linking again adds nothing.
+    view.link(commits)
+    assert len(view.scene().items()) == 3
+    # A group spans its edges, but is never hit by itemAt().
+    for group in groups:
+        rect = group.boundingRect()
+        for edge in group.edges:
+            assert rect.contains(QtCore.QPointF(edge.left, edge.top))
+            assert rect.contains(QtCore.QPointF(edge.right, edge.bottom))
+        assert group.shape().isEmpty()
+    assert view.scene().itemAt(QtCore.QPointF(0, -25), QtGui.QTransform()) is None
+
+
+def test_graph_edge_group_follows_a_moved_commit(qapp, app_context):
+    view, commits = _graph_with_nodes(app_context, [(0.0, 0.0), (0.0, -50.0)])
+    view.link(commits)
+    (group,) = view.scene().items()
+    (edge,) = group.edges
+    assert group.boundingRect().right() < 100
+    view.items[commits[1].oid].point = QtCore.QPointF(300.0, -50.0)
+    edge.commits_were_invalidated()
+    assert (edge.left, edge.right) == (0.0, 300.0)
+    assert group.boundingRect().right() >= 300
+
+
+def test_graph_edge_group_paints_only_the_exposed_edges(qapp, app_context):
+    coordinates = [(0.0, -100.0 * idx) for idx in range(6)]
+    view, commits = _graph_with_nodes(app_context, coordinates)
+    view.link(commits)
+    (group,) = view.scene().items()
+    painter = MagicMock()
+    option = QtWidgets.QStyleOptionGraphicsItem()
+    option.exposedRect = QtCore.QRectF(-10, -260, 20, 20)  # around y=-250
+
+    group.paint(painter, option, None)
+    # Only the edges between y=-200 and y=-300 cross it.
+    assert painter.drawPath.call_count == 1
+
+
+def test_graph_edge_group_recolours_each_shared_pen_once(qapp, app_context):
+    from cola.widgets.dag import EdgeColor
+
+    EdgeColor.update_colors(dark=False)
+    view, commits = _graph_with_nodes(app_context, [(0.0, -10.0 * i) for i in range(5)])
+    view.link(commits)
+    (group,) = view.scene().items()
+    pens = {id(edge.pen) for edge in group.edges}
+    assert len(pens) == 1
+    EdgeColor.update_colors(dark=True)
+    group.refresh_colors()
+    edge = group.edges[0]
+    expected = EdgeColor.colors[edge.color_index % len(EdgeColor.colors)]
+    assert edge.pen.color().rgb() == expected.rgb()
+
+
 def test_graph_layout_leaves_unmoved_nodes_and_their_edges_alone():
     from cola.widgets.dag import GraphView
 
