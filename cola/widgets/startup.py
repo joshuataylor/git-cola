@@ -216,6 +216,11 @@ class StartupDialog(standard.Dialog):
             return self.repodir
         return None
 
+    def open_path(self, path):
+        """Answer the prompt with a repository opened from outside cola"""
+        self.repodir = path
+        self.accept()
+
     def open_repo(self):
         self.repodir = self.get_selected_bookmark()
         if not self.repodir:
