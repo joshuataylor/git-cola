@@ -1730,6 +1730,39 @@ def test_commit_find_cmd_up_down_go_to_the_first_and_last_match(
     assert tree.selectedItems() == [items[1]]
 
 
+def test_commit_find_cmd_f_while_open_keeps_git_matches(qapp, app_context, monkeypatch):
+    """Cmd+F with the bar open refocuses it without searching again
+
+    Searching again dropped git's matches until it finished, so with Only
+    Matches a commit matched by its message vanished, taking the selection.
+    """
+    # Row 2 (position 3) doesn't match "fix" in its summary, only in git.
+    message_oid = f'{3:040x}'
+    found = {'message': {'fix': {message_oid}}}
+    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, found)
+    find.show_find()
+    if not find.only_matches_checkbox.isChecked():
+        find.only_matches_checkbox.click()
+        qapp.processEvents()  # checkbox clicks are queued
+    find.text.setText('fix')
+    find._git_timer.stop()
+    find._git_timer.timeout.emit()
+    message_match = tree.oidmap[message_oid]
+    assert message_match is items[2]
+    tree.select([message_oid])
+    assert tree.find_state.filtering
+    assert not message_match.isHidden()
+    assert items[0].isHidden()
+    searches = len(calls)
+
+    find.show_find()
+
+    assert not message_match.isHidden()
+    assert tree.selectedItems() == [message_match]
+    assert len(calls) == searches
+    assert not find._git_timer.isActive()
+
+
 def test_commit_find_closing_shows_every_commit(qapp, app_context):
     tree, find, _items = _find_tree(app_context)
     find.show()
