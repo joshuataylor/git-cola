@@ -1795,6 +1795,31 @@ def test_set_find_state_announces_the_state(qapp, app_context):
     assert states == [state, None]
 
 
+def test_inline_graph_summary_is_elided(qapp, app_context, monkeypatch):
+    """A summary too long for the column ends in an ellipsis, not mid-letter"""
+    tree = CommitTreeWidget(app_context, None)
+    commit = _commit_for_graph(app_context, f'{1:040x}')
+    commit.summary = 'a summary far too long to fit the narrow column ' * 4
+    tree.add_commits([commit])
+    tree.display_inline_graph(True)
+    tree.resize(400, 120)
+    tree.setColumnWidth(CommitTreeWidgetItem.SUMMARY, 200)
+
+    drawn = []
+    draw_text = QtGui.QPainter.drawText
+
+    def record(painter, *args):
+        if isinstance(args[-1], str):
+            drawn.append(args[-1])
+        return draw_text(painter, *args)
+
+    monkeypatch.setattr(QtGui.QPainter, 'drawText', record)
+    tree.viewport().grab()
+    summaries = [text for text in drawn if text.startswith('a summary')]
+    assert summaries
+    assert all(text.endswith(chr(0x2026)) for text in summaries)
+
+
 def test_commit_find_escape_hides(qapp, app_context):
     """Esc hides the find bar and refocuses the widget it was opened from"""
     tree, find, _items = _find_tree(app_context)
