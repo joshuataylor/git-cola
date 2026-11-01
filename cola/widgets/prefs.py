@@ -1,4 +1,3 @@
-from qtpy import QtCore
 from qtpy import QtWidgets
 
 from .. import cmds
@@ -16,11 +15,25 @@ from ..models.prefs import fallback_editor
 from . import defs
 from . import standard
 
+# The Preferences window that is open, so Cmd+, raises it instead of
+# opening a second one.
+_open_view = None
+
 
 def preferences(context, model=None, parent=None):
+    global _open_view
+    view = _open_view
+    try:
+        visible = view is not None and view.isVisible()
+    except RuntimeError:  # the window has been deleted
+        visible = False
+    if visible:
+        view.raise_()
+        view.activateWindow()
+        return view
     if model is None:
         model = prefs.PreferencesModel(context)
-    view = PreferencesView(context, model, parent=parent)
+    view = _open_view = PreferencesView(context, model, parent=parent)
     view.show()
     view.raise_()
     return view
@@ -928,8 +941,8 @@ class PreferencesView(standard.Dialog):
         standard.Dialog.__init__(self, parent=parent)
         self.context = context
         self.setWindowTitle(N_('Preferences'))
-        if parent is not None:
-            self.setWindowModality(QtCore.Qt.WindowModal)
+        # Not modal: every setting applies as it changes, so the windows
+        # behind stay usable to see the effect.
 
         self.tab_bar = QtWidgets.QTabBar()
         self.tab_bar.setDrawBase(False)
