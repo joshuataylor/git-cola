@@ -2012,6 +2012,33 @@ def test_commit_find_shows_only_the_matching_commits(qapp, app_context):
     assert tree.find_state is None
 
 
+def _cmd_arrow(widget, key):
+    event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, key, Qt.ControlModifier)
+    QtWidgets.QApplication.sendEvent(widget, event)
+
+
+def test_commit_find_cmd_up_down_go_to_the_first_and_last_match(
+    qapp, app_context, monkeypatch
+):
+    """From the find field, Cmd+Up/Down select the first/last match on macOS"""
+    monkeypatch.setattr('cola.widgets.dag.core.IS_DARWIN', True)
+    tree, find, items = _find_tree(app_context)
+    find.show()
+    find.text.setText('fix number')
+    tree.select([items[3].commit.oid])
+
+    _cmd_arrow(find.text, Qt.Key_Down)
+    assert tree.selectedItems() == [items[4]]
+    _cmd_arrow(find.text, Qt.Key_Up)
+    assert tree.selectedItems() == [items[1]]
+    assert find.count_label.text() == '1/3'
+
+    # Off macOS the field keeps Qt's behaviour.
+    monkeypatch.setattr('cola.widgets.dag.core.IS_DARWIN', False)
+    _cmd_arrow(find.text, Qt.Key_Down)
+    assert tree.selectedItems() == [items[1]]
+
+
 def test_commit_find_closing_shows_every_commit(qapp, app_context):
     tree, find, _items = _find_tree(app_context)
     find.show()
@@ -2518,6 +2545,30 @@ def test_cmd_up_and_down_select_the_first_and_last_commit_on_macos(
     last = tree.topLevelItem(tree.topLevelItemCount() - 1)
     assert tree.selectedItems() == [last]
     assert tree.currentItem() is last
+
+
+def test_cmd_up_and_down_skip_rows_the_find_bar_hides(qapp, app_context, monkeypatch):
+    """With Only Matches, Cmd+Up/Down go to the first and last match shown"""
+    from qtpy.QtTest import QTest
+
+    monkeypatch.setattr('cola.widgets.dag.core.IS_DARWIN', True)
+    tree = _commit_list(app_context)
+    count = tree.topLevelItemCount()
+    assert count > 4
+    tree.show_only_rows({1, count - 2})
+    tree.select([tree.topLevelItem(1).commit.oid])
+
+    QTest.keyClick(tree, Qt.Key_Down, Qt.ControlModifier)
+    assert tree.selectedItems() == [tree.topLevelItem(count - 2)]
+    QTest.keyClick(tree, Qt.Key_Up, Qt.ControlModifier)
+    assert tree.selectedItems() == [tree.topLevelItem(1)]
+
+    # Every row hidden: nothing hidden gets selected.
+    tree.show_only_rows(set())
+    before = tree.selectedItems()
+    tree.go_top()
+    tree.go_bottom()
+    assert tree.selectedItems() == before
 
 
 def test_ctrl_up_keeps_qt_behaviour_off_macos(qapp, app_context, monkeypatch):

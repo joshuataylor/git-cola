@@ -2139,16 +2139,21 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             self.select([found.commit.oid])
 
     def go_top(self):
-        """Select the first (newest) commit"""
-        count = self.topLevelItemCount()
-        if count:
-            self.select([self.topLevelItem(0).commit.oid])
+        """Select the first (newest) commit shown"""
+        self._select_first_shown(range(self.topLevelItemCount()))
 
     def go_bottom(self):
-        """Select the last (oldest) commit"""
-        count = self.topLevelItemCount()
-        if count:
-            self.select([self.topLevelItem(count - 1).commit.oid])
+        """Select the last (oldest) commit shown"""
+        self._select_first_shown(range(self.topLevelItemCount() - 1, -1, -1))
+
+    def _select_first_shown(self, rows):
+        """Select the first of rows that the find bar's Only Matches shows"""
+        hidden = self._hidden_positions
+        last = len(self.commits) - 1
+        for row in rows:
+            if last - row not in hidden:
+                self.select([self.topLevelItem(row).commit.oid])
+                return
 
     def go_head(self):
         """Select the commit HEAD points at, when it is listed and shown"""
@@ -2637,6 +2642,7 @@ class CommitFindWidget(QtWidgets.QWidget):
 
         self.text.esc_pressed.connect(self.hide_find)
         self.text.returnPressed.connect(self.search)
+        self.text.installEventFilter(self)
         self.text.textChanged.connect(self._criteria_changed)
         tree.commits_changed.connect(self.invalidate)
 
@@ -2692,6 +2698,37 @@ class CommitFindWidget(QtWidgets.QWidget):
     def search(self):
         """Select the next matching commit"""
         self._jump(backwards=False, inclusive=False)
+
+    def first_match(self):
+        """Select the first (newest) matching commit"""
+        self._jump(backwards=False, inclusive=True, row=0)
+
+    def last_match(self):
+        """Select the last (oldest) matching commit"""
+        self._jump(
+            backwards=True, inclusive=True, row=self._tree.topLevelItemCount() - 1
+        )
+
+    def eventFilter(self, obj, event):
+        """Cmd+Up/Cmd+Down in the find field go to the first/last match on macOS
+
+        As in the commit list, but the field keeps the focus, so typing goes
+        on. A one-line field loses nothing: Cmd+Left/Right still move the
+        cursor to either end.
+        """
+        if (
+            obj is self.text
+            and core.IS_DARWIN
+            and event.type() == QtCore.QEvent.KeyPress
+            and event.modifiers() & ~Qt.KeypadModifier == Qt.ControlModifier
+            and event.key() in (Qt.Key_Up, Qt.Key_Down)
+        ):
+            if event.key() == Qt.Key_Up:
+                self.first_match()
+            else:
+                self.last_match()
+            return True
+        return super().eventFilter(obj, event)
 
     def search_backwards(self):
         """Select the previous matching commit"""
