@@ -1316,6 +1316,9 @@ def _git_find_tree(app_context, monkeypatch, found):
 
     monkeypatch.setattr(dag_widgets, 'find_commits_with_git', fake_git)
     find._runtask = _SyncRunTask()
+    # Only the tests' own timeout.emit() starts a search: the real interval
+    # can expire inside processEvents() and make the test depend on timing.
+    find._git_timer.setInterval(3600 * 1000)
     return tree, find, items, calls
 
 
