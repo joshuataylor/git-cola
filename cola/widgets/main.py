@@ -354,6 +354,14 @@ class MainView(standard.MainWindow):
             self, N_('Quit'), self.close, hotkeys.QUIT
         )
         self.quit_action.setMenuRole(QtWidgets.QAction.QuitRole)
+        if core.IS_DARWIN:
+            # Cmd+W closes the window, as the red button does. With a DAG
+            # window still open the app keeps running, otherwise it quits.
+            self.close_window_action = qtutils.add_action(
+                self, N_('Close Window'), self.close, hotkeys.CLOSE
+            )
+        else:
+            self.close_window_action = None
 
         self.grep_action = qtutils.add_action_with_icon(
             self, icons.search(), N_('Grep'), partial(grep.grep, context), hotkeys.GREP
@@ -767,6 +775,9 @@ class MainView(standard.MainWindow):
         if lfs:
             self.file_menu.addAction(self.lfs_init_action)
 
+        if self.close_window_action is not None:
+            self.file_menu.addSeparator()
+            self.file_menu.addAction(self.close_window_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.preferences_action)
         self.file_menu.addAction(self.quit_action)
