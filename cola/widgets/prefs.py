@@ -763,7 +763,10 @@ class AppearanceWidget(QtWidgets.QWidget):
         self.form = form
         self.label = QtWidgets.QLabel(
             '<center><b>'
-            + N_('Restart the application after changing appearance settings.')
+            + N_(
+                'The GUI theme and fonts change at once. Restart the application'
+                ' after changing the other appearance settings.'
+            )
             + '</b></center>'
         )
         layout = qtutils.vbox(
