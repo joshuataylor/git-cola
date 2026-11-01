@@ -21,6 +21,10 @@ def metrics_for(platform):
     14px between the last group and the button row, and no extra margin on
     nested layouts.  Every other platform
     keeps the legacy 4px metrics so nothing changes outside macOS.
+
+    action_text is the size of the dock titles and the commit editor's
+    cursor position label: macOS's small system font size (11pt,
+    NSFont.smallSystemFontSize) rather than the legacy 10.
     """
     if platform == 'darwin':
         return {
@@ -30,6 +34,7 @@ def metrics_for(platform):
             'group_spacing': 16,
             'button_row_spacing': 14,
             'inner_margin': 0,
+            'action_text': 11,
         }
     return {
         'dialog_margin': 4,
@@ -38,6 +43,7 @@ def metrics_for(platform):
         'group_spacing': 12,
         'button_row_spacing': 12,
         'inner_margin': 12,
+        'action_text': 10,
     }
 
 
@@ -82,7 +88,7 @@ border = max(1, scale(0.5))
 checkbox = scale(12)
 radio = scale(22)
 
-action_text = scale(10)
+action_text = scale(_metrics['action_text'])
 logo_text = 24
 
 radio_border = max(1, scale(1.0 - (1.0 / math.pi)))
