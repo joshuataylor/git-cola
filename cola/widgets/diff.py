@@ -36,6 +36,7 @@ from ..models import prefs
 from ..qtutils import get
 from . import defs
 from . import diff_intraline
+from . import findmarks
 from . import imageview
 from . import standard
 from .text import PlainTextLabel
@@ -292,6 +293,36 @@ class DiffSyntaxHighlighter(QtGui.QSyntaxHighlighter):
         return state, formats
 
 
+def diff_header_position(text):
+    """Where the patch starts in a commit's text: its first "diff --git" line
+
+    Commit diffs put the commit message body before the patch. Falls back to
+    the first hunk, and returns None when the text has neither.
+    """
+    if not text:
+        return None
+    if text.startswith('diff --git '):
+        return 0
+    newline = text.find('\ndiff --git ')
+    if newline == -1:
+        newline = text.find('\n@@ ')
+    if newline == -1:
+        return None
+    return newline + 1
+
+
+def commit_message_text(text):
+    """The commit message part of a commit's text, before the patch
+
+    Output from an external diff tool (e.g. difftastic) has no "diff --git"
+    header, so all of it counts.
+    """
+    position = diff_header_position(text)
+    if position is None:
+        return text
+    return text[:position]
+
+
 class DiffTextEdit(VimHintedPlainTextEdit):
     """A textedit for interacting with diff text"""
 
@@ -321,6 +352,9 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         self._intraline_diff_timing = False
 
         self._current_diff_text: str = ''
+        # The DAG find bar's text, marked in the commit message (not the patch).
+        self._find_needle: str | None = None
+        self._find_case_sensitive = False
         # What set_diff() last rendered, see _render_key().
         self._rendered_key: tuple | None = None
         # Deferred intra-line spans for large diffs, see set_diff().
@@ -468,6 +502,23 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         self.restore_scrollbar()
         self._rendered_key = self._render_key(diff)
+        self._apply_find_highlight()
+
+    def set_find_highlight(self, needle, case_sensitive=False):
+        """Mark needle in the commit message above the patch, or stop with None"""
+        self._find_needle = needle or None
+        self._find_case_sensitive = case_sensitive
+        self._apply_find_highlight()
+
+    def _apply_find_highlight(self):
+        text = self._current_diff_text
+        spans = []
+        if self._find_needle and text:
+            message = commit_message_text(text)
+            spans = findmarks.match_spans(
+                message, self._find_needle, self._find_case_sensitive
+            )
+        self.setExtraSelections(findmarks.text_selections(self.document(), text, spans))
 
     def _render_key(self, diff):
         """What set_diff() output depends on, and whether the document changed
@@ -485,18 +536,9 @@ class DiffTextEdit(VimHintedPlainTextEdit):
         message, so the viewport is moved past the message to the "diff --git"
         header (falling back to the first hunk when there is no such header).
         """
-        text = self._current_diff_text
-        if not text:
+        position = diff_header_position(self._current_diff_text)
+        if position is None:
             return
-        if text.startswith('diff --git '):
-            position = 0
-        else:
-            newline = text.find('\ndiff --git ')
-            if newline == -1:
-                newline = text.find('\n@@ ')
-            if newline == -1:
-                return
-            position = newline + 1
 
         cursor = self.textCursor()
         cursor.setPosition(position)
@@ -531,6 +573,7 @@ class DiffTextEdit(VimHintedPlainTextEdit):
 
         self._current_diff_text = ansi.strip_ansi(diff)
         self.restore_scrollbar()
+        self._apply_find_highlight()
 
     # vvv inline-diff highlight begin vvv
     def update_intraline_diff_spans(self) -> None:

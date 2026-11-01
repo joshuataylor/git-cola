@@ -350,3 +350,33 @@ def test_gather_files_failure_returns_no_paths():
     context.git.show.return_value = (1, '', 'fatal: bad object')
 
     assert gather_files(context, ('oid', 'a' * 40)) == []
+
+
+def _marked_pixels(image):
+    """Count pixels tinted by the find mark over a white background"""
+    count = 0
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            color = image.pixelColor(x, y)
+            if color.red() > 200 and color.green() > 180 and color.blue() < 170:
+                count += 1
+    return count
+
+
+def test_find_marks_matching_paths(file_widget):
+    """The DAG find bar's text is marked in the paths that contain it"""
+    widget, qapp = file_widget
+    palette = widget.palette()
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(Qt.white))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(Qt.white))
+    widget.setPalette(palette)
+    widget.list_files(['1\t2\tcola/widgets/filelist.py', '3\t4\tREADME.md'])
+    qapp.processEvents()
+    assert _marked_pixels(widget.viewport().grab().toImage()) == 0
+
+    widget.set_find_highlight('FILELIST')
+    assert _marked_pixels(widget.viewport().grab().toImage()) > 0
+    widget.set_find_highlight('FILELIST', case_sensitive=True)
+    assert _marked_pixels(widget.viewport().grab().toImage()) == 0
+    widget.set_find_highlight(None)
+    assert _marked_pixels(widget.viewport().grab().toImage()) == 0

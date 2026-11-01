@@ -234,3 +234,47 @@ def test_small_diffs_still_get_their_spans_in_the_first_pass(qapp, app_context):
     assert edit.highlighter._intraline_spans
     assert not edit._intraline_timer.isActive()
     assert calls == []
+
+
+COMMIT_TEXT = 'Body that mentions the needle twice: needle.\n\n' 'diff --git a/needle.py b/needle.py\n' '@@ -1 +1 @@\n' '-needle = 1\n' '+needle = 2\n'
+
+
+def test_commit_message_text_stops_at_the_patch():
+    from cola.widgets.diff import commit_message_text
+
+    message = 'Body that mentions the needle twice: needle.\n\n'
+    assert commit_message_text(COMMIT_TEXT) == message
+    assert commit_message_text('diff --git a/x b/x\n') == ''
+    assert commit_message_text('Body\n\n@@ -1 +1 @@\n-a\n+b') == 'Body\n\n'
+    assert commit_message_text('Only a message') == 'Only a message'
+
+
+def _marked(widget):
+    return [selection.cursor.selectedText() for selection in widget.extraSelections()]
+
+
+def test_find_highlight_marks_the_message_not_the_patch(qapp, app_context):
+    """The DAG find bar's text is marked in the commit message only"""
+    widget, _calls = _diff_text_edit(app_context)
+    widget.set_diff(COMMIT_TEXT)
+    assert _marked(widget) == []
+
+    widget.set_find_highlight('NEEDLE')
+    assert _marked(widget) == ['needle', 'needle']
+    widget.set_find_highlight('NEEDLE', case_sensitive=True)
+    assert _marked(widget) == []
+
+    # A new commit's text is marked as it is shown.
+    widget.set_find_highlight('needle')
+    widget.set_diff('Another needle\n\ndiff --git a/b b/b\n@@ -1 +1 @@\n-needle\n')
+    assert _marked(widget) == ['needle']
+    widget.set_find_highlight(None)
+    assert _marked(widget) == []
+
+
+def test_find_highlight_counts_utf16_positions(qapp, app_context):
+    """Text outside the BMP takes two QTextDocument positions"""
+    widget, _calls = _diff_text_edit(app_context)
+    widget.set_diff('\U0001f600 then needle\n')
+    widget.set_find_highlight('needle')
+    assert _marked(widget) == ['needle']
