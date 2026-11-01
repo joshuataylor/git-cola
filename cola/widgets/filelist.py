@@ -13,6 +13,7 @@ from .. import hotkeys
 from .. import qtutils
 from ..i18n import N_
 from ..models import dag
+from . import findmarks
 from .standard import TreeWidget
 
 
@@ -127,6 +128,10 @@ class FileWidget(TreeWidget):
         self._auto_resizing = False
         self._user_adjusted_columns = False
         self.setHeaderLabels([N_('Filename'), '+', '-'])
+        # The DAG find bar's text, marked in the paths. See set_find_highlight().
+        self.find_needle = None
+        self.find_case_sensitive = False
+        self.setItemDelegate(findmarks.FindMarkDelegate(self))
         header = self.header()
         # The Filename column absorbs the free space; without this the last
         # (narrow "-") column would stretch instead. Disabling it also keeps
@@ -169,6 +174,12 @@ class FileWidget(TreeWidget):
             self.toggle_remark_actions = ()
 
         self.itemSelectionChanged.connect(self.selection_changed)
+
+    def set_find_highlight(self, needle, case_sensitive=False):
+        """Mark needle in the paths, or stop with None"""
+        self.find_needle = needle or None
+        self.find_case_sensitive = case_sensitive
+        self.viewport().update()
 
     def keyPressEvent(self, event):
         """Scope the DAG to the selected file(s) on Shift+Enter"""

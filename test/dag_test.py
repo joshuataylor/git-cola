@@ -1751,6 +1751,50 @@ def test_selected_row_text_uses_the_highlighted_text_colour(qapp, app_context):
     assert _dark_pixels(image, cell(selected)) == 0
 
 
+class _MarkView:
+    def __init__(self):
+        self.calls = []
+
+    def set_find_highlight(self, needle, case_sensitive=False):
+        self.calls.append((needle, case_sensitive))
+
+
+def test_find_marks_follow_the_searched_kinds():
+    """The message pane and file list mark only what the find bar searches"""
+    message_view = _MarkView()
+    file_view = _MarkView()
+    dag_widgets.show_find_marks(
+        FindState('fix', case_sensitive=True), message_view, file_view
+    )
+    dag_widgets.show_find_marks(
+        FindState('fix', messages=False), message_view, file_view
+    )
+    dag_widgets.show_find_marks(FindState('fix', files=False), message_view, file_view)
+    dag_widgets.show_find_marks(None, message_view, file_view)
+    assert message_view.calls == [
+        ('fix', True),
+        (None, False),
+        ('fix', False),
+        (None, False),
+    ]
+    assert file_view.calls == [
+        ('fix', True),
+        ('fix', False),
+        (None, False),
+        (None, False),
+    ]
+
+
+def test_set_find_state_announces_the_state(qapp, app_context):
+    tree = CommitTreeWidget(app_context, None)
+    states = []
+    tree.find_state_changed.connect(states.append)
+    state = FindState('fix')
+    tree.set_find_state(state)
+    tree.set_find_state(None)
+    assert states == [state, None]
+
+
 def test_commit_find_escape_hides(qapp, app_context):
     """Esc hides the find bar and refocuses the widget it was opened from"""
     tree, find, _items = _find_tree(app_context)

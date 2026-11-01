@@ -47,8 +47,10 @@ from . import diff
 from . import diff_intraline
 from . import filelist
 from . import finder
+from . import findmarks
 from . import prefs as prefs_widget
 from . import standard
+from .findmarks import match_spans
 from .text import HintedDefaultLineEdit
 
 
@@ -1103,21 +1105,6 @@ def _identity(value):
     return value
 
 
-def match_spans(text, needle, case_sensitive=False):
-    """(start, length) of each non-overlapping occurrence of needle in text"""
-    if not text or not needle:
-        return []
-    if not case_sensitive:
-        text = text.lower()
-        needle = needle.lower()
-    spans = []
-    start = text.find(needle)
-    while start >= 0:
-        spans.append((start, len(needle)))
-        start = text.find(needle, start + len(needle))
-    return spans
-
-
 def cell_text_color(option):
     """The colour for text a delegate draws itself: light on a selected row"""
     if option.state & QtWidgets.QStyle.State_Selected:
@@ -1128,16 +1115,26 @@ def cell_text_color(option):
 class FindState:
     """What the find bar is looking for, as the commit list paints it"""
 
-    # Translucent, so it reads as a highlighter mark over the text in light
-    # and dark themes, and over the selection colour.
-    highlight = QtGui.QColor(255, 200, 0, 110)
+    highlight = findmarks.HIGHLIGHT
 
-    def __init__(self, needle, case_sensitive=False, git_kinds=None, filtering=False):
+    def __init__(
+        self,
+        needle,
+        case_sensitive=False,
+        git_kinds=None,
+        filtering=False,
+        messages=True,
+        files=True,
+    ):
         self.needle = needle
         self.case_sensitive = case_sensitive
         self.git_kinds = git_kinds or {}
         """oid -> {'message', 'files'}, the kinds git matched for that commit"""
         self.filtering = filtering
+        self.messages = messages
+        """Whether full messages are searched, so the message pane marks matches"""
+        self.files = files
+        """Whether changed paths are searched, so the file list marks matches"""
 
     def spans(self, text):
         return match_spans(text, self.needle, self.case_sensitive)
@@ -1164,15 +1161,9 @@ class FindState:
 
     def paint_spans(self, painter, text, text_x, rect, font_metrics):
         """Mark each match in text, drawn from text_x, within rect"""
-        for start, length in self.spans(text):
-            left = text_x + font_metrics.horizontalAdvance(text[:start])
-            if left >= rect.right():
-                break
-            width = font_metrics.horizontalAdvance(text[start : start + length])
-            mark = QtCore.QRect(
-                int(left), rect.top() + 1, int(width), rect.height() - 2
-            )
-            painter.fillRect(mark.intersected(rect), self.highlight)
+        findmarks.paint_spans(
+            painter, text, self.spans(text), text_x, rect, font_metrics
+        )
 
     @staticmethod
     def badge_rect(badge, rect, font_metrics):
@@ -1236,23 +1227,8 @@ class FindHighlightDelegate(QtWidgets.QStyledItemDelegate):
                 cell.rect = QtCore.QRect(option.rect)
                 cell.rect.setRight(badge_rect.left() - 4)
         super().paint(painter, cell, index)
-        text = index.data(Qt.DisplayRole)
-        opt = QtWidgets.QStyleOptionViewItem(cell)
-        self.initStyleOption(opt, index)
-        style = tree.style() if tree is not None else QtWidgets.QApplication.style()
-        text_rect = style.subElementRect(
-            QtWidgets.QStyle.SE_ItemViewItemText, opt, tree
-        )
-        margin = (
-            style.pixelMetric(QtWidgets.QStyle.PM_FocusFrameHMargin, None, tree) + 1
-        )
-        if text:
-            painter.save()
-            painter.setClipRect(text_rect)
-            state.paint_spans(
-                painter, text, text_rect.left() + margin, text_rect, option.fontMetrics
-            )
-            painter.restore()
+        spans = state.spans(index.data(Qt.DisplayRole))
+        findmarks.paint_item_spans(self, painter, cell, index, tree, spans)
         if badge:
             state.paint_badge(painter, badge, option.rect, option)
 
@@ -1788,6 +1764,8 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
     zoom_to_fit = Signal()
     commits_changed = Signal()
     """Emitted when rows are added or the tree is cleared"""
+    find_state_changed = Signal(object)
+    """Emitted with the new FindState, or None, by set_find_state()"""
 
     def __init__(self, context, parent):
         standard.TreeWidget.__init__(self, parent)
@@ -1865,6 +1843,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         """Highlight the find bar's matches, or stop with None"""
         self.find_state = state
         self.viewport().update()
+        self.find_state_changed.emit(state)
 
     def show_only_rows(self, rows):
         """Hide every row not in rows, or show them all again with None"""
@@ -2326,6 +2305,22 @@ def find_git_args(needle, kind, case_sensitive=False):
     return args
 
 
+def show_find_marks(state, message_view, file_view):
+    """Mark the find bar's text in the commit message pane and the file list
+
+    Each view only marks it when the find bar searches that kind (Messages,
+    Files), so a match there is what put the commit in the results.
+    """
+    needle = state.needle if state is not None else None
+    case_sensitive = state.case_sensitive if state is not None else False
+    message_view.set_find_highlight(
+        needle if state is not None and state.messages else None, case_sensitive
+    )
+    file_view.set_find_highlight(
+        needle if state is not None and state.files else None, case_sensitive
+    )
+
+
 class GitFindSearch:
     """One find-bar search by git, which the GUI thread can stop
 
@@ -2664,6 +2659,8 @@ class CommitFindWidget(QtWidgets.QWidget):
                 case_sensitive=self.match_case_checkbox.isChecked(),
                 git_kinds=self._matched_kinds,
                 filtering=filtering,
+                messages=self.messages_checkbox.isChecked(),
+                files=self.files_checkbox.isChecked(),
             )
         )
         tree.show_only_rows(set(self._matching_rows()) if filtering else None)
@@ -3069,6 +3066,9 @@ class GitDAG(standard.MainWindow):
         )
         self.treewidget.diff_commits.connect(
             self.diff_commits, type=Qt.QueuedConnection
+        )
+        self.treewidget.find_state_changed.connect(
+            lambda state: show_find_marks(state, self.diffwidget.diff, self.filewidget)
         )
         self.treewidget.search_line_range_in_oid.connect(
             self.search_line_range_in_oid, type=Qt.QueuedConnection
