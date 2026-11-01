@@ -1094,6 +1094,45 @@ def test_superseded_deferred_build_bails(qapp, app_context):
     assert win._graph_stale is True
 
 
+def _hover_tooltip(qapp, tree, item):
+    """Deliver a ToolTip help event over item as Qt does and return the text"""
+    viewport = tree.viewport()
+    pos = tree.visualItemRect(item).center()
+    event = QtGui.QHelpEvent(QtCore.QEvent.ToolTip, pos, viewport.mapToGlobal(pos))
+    shown = []
+    with patch.object(
+        dag_widgets.QtWidgets.QToolTip,
+        'showText',
+        side_effect=lambda _pos, text, *_args: shown.append(text),
+    ):
+        # QApplication passes the event from the viewport up to the tree,
+        # translating the position on the way.
+        qapp.sendEvent(viewport, event)
+    return shown
+
+
+def test_message_tooltip_is_for_the_hovered_row(qapp, app_context):
+    """Hovering a row shows that row's message, not the next row's
+
+    The tree receives the event in its own coordinates, which sit a header's
+    height below the viewport's.
+    """
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(6)]
+    tree.add_commits(commits)
+    tree.resize(400, 300)
+    tree.show()
+    qapp.processEvents()
+    assert tree.viewport().y() > 0
+
+    with patch.object(dag_widgets, 'commit_message', side_effect=lambda _ctx, oid: oid):
+        for row in range(4):
+            item = tree.topLevelItem(row)
+            shown = _hover_tooltip(qapp, tree, item)
+            assert shown == [dag_widgets.format_message_tooltip(item.commit.oid)]
+    tree.close()
+
+
 def test_select_moves_the_current_row(qapp, app_context):
     """Selecting from the graph moves the list's current row and anchor"""
     tree = CommitTreeWidget(app_context, None)

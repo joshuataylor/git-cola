@@ -2253,7 +2253,10 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
     def event(self, event):
         """Show the full commit message when hovering a row"""
         if event.type() == QtCore.QEvent.ToolTip:
-            pos = event.pos()
+            # The viewport declined the event, so it reached the tree in the
+            # tree's own coordinates. itemAt() and columnAt() take viewport
+            # coordinates, which start below the header.
+            pos = self.viewport().mapFrom(self, event.pos())
             item = self.itemAt(pos)
             column = self.columnAt(pos.x())
             # Cells with their own tooltip (e.g. the signature column) keep it.
