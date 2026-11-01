@@ -32,6 +32,9 @@ from .text import event_anchor_mode
 from .text import is_shift_pressed
 from .text import keep_option_shortcuts
 
+# The conventional limit for a commit summary
+SUMMARY_GUIDE = 50
+
 
 class CommitMessageEditor(QtWidgets.QFrame):
     commit_finished = Signal(object)
@@ -812,7 +815,9 @@ class CommitMessageEditor(QtWidgets.QFrame):
             color = 'red'
         elif max_width > 72:
             color = '#ff8833'
-        elif max_width > 64:
+        elif max_width > 64 or len(get(self.summary)) > SUMMARY_GUIDE:
+            # A summary past the conventional 50 characters gets the first,
+            # mildest colour. It is a hint, so nothing stops a longer one.
             color = 'yellow'
         else:
             color = ''
