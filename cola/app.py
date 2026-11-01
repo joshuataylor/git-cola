@@ -210,6 +210,14 @@ def get_icon_themes(context: ApplicationContext) -> list[str]:
     return result
 
 
+def icon_theme_follows_system(context: ApplicationContext) -> bool:
+    """Are the icons picked from the system appearance, with no theme chosen?"""
+    if core.getenv('GIT_COLA_ICON_THEME'):
+        return False
+    icon_themes_cfg = context.cfg.get_all('cola.icontheme')
+    return not icon_themes_cfg or list(icon_themes_cfg) == ['default']
+
+
 def set_application_name(app_name) -> None:
     """Tell Qt and Cocoa the user-visible application name.
 
@@ -317,7 +325,10 @@ class ColaApplication:
         self._app = ColaQApplication(context, list(argv))
         if core.IS_DARWIN:
             keyequivalents.install()
-        icons.install(icon_themes or get_icon_themes(context))
+        icons.install(
+            icon_themes or get_icon_themes(context),
+            follow_system=not icon_themes and icon_theme_follows_system(context),
+        )
         # Icons must be installed before setting icons.
         self._app.setWindowIcon(icons.cola())
         self._app.setDesktopFileName('git-cola')
@@ -503,6 +514,8 @@ class ColaQApplication(QtWidgets.QApplication):
             hasattr(QtCore.QEvent, 'ApplicationPaletteChange')
             and e.type() == QtCore.QEvent.ApplicationPaletteChange
         ):
+            # The icons pick their light or dark set from the palette.
+            icons.palette_changed()
             cola_app = getattr(self.context, 'app', None)
             if cola_app:
                 QtCore.QTimer.singleShot(0, cola_app.refresh_system_appearance)
