@@ -2011,6 +2011,55 @@ def test_commit_find_highlights_the_matched_text(qapp, app_context):
     assert _highlighted_pixels(tree.grab().toImage()) == 0
 
 
+def _dark_pixels(image, rect):
+    """Count the near-black pixels inside rect"""
+    count = 0
+    for y in range(rect.top(), rect.bottom() + 1):
+        for x in range(rect.left(), rect.right() + 1):
+            color = image.pixelColor(x, y)
+            if color.red() < 60 and color.green() < 60 and color.blue() < 60:
+                count += 1
+    return count
+
+
+def test_selected_row_text_uses_the_highlighted_text_colour(qapp, app_context):
+    """With the inline graph, a selected row's summary and badge are drawn light
+
+    Black text stayed black on the selection colour while the other columns
+    turned white.
+    """
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(3)]
+    tree.add_commits(commits)
+    tree.display_inline_graph(True)
+    tree.resize(600, 200)
+    tree.setColumnWidth(CommitTreeWidgetItem.SUMMARY, 400)
+    palette = tree.palette()
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(Qt.white))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(Qt.white))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(Qt.black))
+    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(0, 70, 200))
+    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(Qt.white))
+    tree.setPalette(palette)
+    selected = tree.topLevelItem(0)
+    plain = tree.topLevelItem(1)
+    tree.setCurrentItem(selected)
+    # The badge names a match only git found, so every row shows it.
+    git_kinds = {commit.oid: {'message'} for commit in commits}
+    tree.set_find_state(FindState('needle', git_kinds=git_kinds))
+
+    image = tree.viewport().grab().toImage()
+    summary_left = tree.header().sectionPosition(CommitTreeWidgetItem.SUMMARY)
+    summary_width = tree.header().sectionSize(CommitTreeWidgetItem.SUMMARY)
+
+    def cell(item):
+        rect = tree.visualItemRect(item)
+        return QtCore.QRect(summary_left, rect.top(), summary_width, rect.height())
+
+    assert _dark_pixels(image, cell(plain)) > 0
+    assert _dark_pixels(image, cell(selected)) == 0
+
+
 def test_commit_find_escape_hides(qapp, app_context):
     """Esc hides the find bar and refocuses the widget it was opened from"""
     tree, find, _items = _find_tree(app_context)

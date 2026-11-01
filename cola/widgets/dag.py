@@ -1127,6 +1127,13 @@ def match_spans(text, needle, case_sensitive=False):
     return spans
 
 
+def cell_text_color(option):
+    """The colour for text a delegate draws itself: light on a selected row"""
+    if option.state & QtWidgets.QStyle.State_Selected:
+        return option.palette.highlightedText().color()
+    return option.palette.text().color()
+
+
 class FindState:
     """What the find bar is looking for, as the commit list paints it"""
 
@@ -1198,7 +1205,7 @@ class FindState:
         painter.setPen(Qt.NoPen)
         painter.setBrush(self.highlight)
         painter.drawRoundedRect(badge_rect, 4, 4)
-        painter.setPen(option.palette.text().color())
+        painter.setPen(cell_text_color(option))
         painter.drawText(badge_rect, Qt.AlignCenter, badge)
         painter.restore()
 
@@ -1448,7 +1455,7 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
                 text_rect.setRight(max(text_rect.left(), badge_rect.left() - 4))
             if state is not None:
                 state.paint_spans(painter, text, text_x, text_rect, option.fontMetrics)
-            painter.setPen(option.palette.text().color())
+            painter.setPen(cell_text_color(option))
             painter.drawText(
                 text_rect,
                 Qt.AlignLeft | Qt.AlignVCenter,
