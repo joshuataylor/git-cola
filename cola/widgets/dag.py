@@ -1420,6 +1420,10 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
                 # The text stops short of the badge instead of running under it.
                 badge_rect = state.badge_rect(badge, rect, option.fontMetrics)
                 text_rect.setRight(max(text_rect.left(), badge_rect.left() - 4))
+            # Elide like the other columns, and mark matches in what is drawn.
+            text = option.fontMetrics.elidedText(
+                text, option.textElideMode, max(0, text_rect.width())
+            )
             if state is not None:
                 state.paint_spans(painter, text, text_x, text_rect, option.fontMetrics)
             painter.setPen(cell_text_color(option))
