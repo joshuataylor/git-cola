@@ -1199,6 +1199,58 @@ def test_commit_messages_reads_every_message_in_order(app_context):
     ]
 
 
+def _reader_dag(app_context):
+    """A GitDAG stand-in with just what the reader thread plumbing uses"""
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    win.context = app_context
+    win.params = dag.DAG('HEAD', 10)
+    win._stopping_threads = set()
+    win.thread_begin = MagicMock()
+    win.thread_status = MagicMock()
+    win.add_commits = MagicMock()
+    win.thread_end = MagicMock()
+    return win
+
+
+def test_a_reader_still_stopping_is_replaced_not_reused(qapp, app_context):
+    """start() on a running QThread does nothing, which dropped the new query"""
+    win = _reader_dag(app_context)
+    fresh = MagicMock()
+    win._new_reader_thread = lambda: fresh  # no real thread in the suite
+    old = MagicMock()
+    old.isRunning.return_value = True
+    win.thread = old
+    win._start_reader_thread()
+    assert win.thread is fresh
+    fresh.start.assert_called_once()
+    assert old in win._stopping_threads
+    old.start.assert_not_called()
+
+    idle = MagicMock()
+    idle.isRunning.return_value = False
+    win.thread = idle
+    win._start_reader_thread()
+    assert win.thread is idle
+    idle.start.assert_called_once()
+
+
+def test_a_replaced_reader_signals_are_ignored(qapp, app_context):
+    win = _reader_dag(app_context)
+    old = win._new_reader_thread()
+    win.thread = old
+    old.add.emit(['first'])
+    qapp.processEvents()
+    win.add_commits.assert_called_once_with(['first'])
+
+    win.thread = win._new_reader_thread()
+    old.add.emit(['stale'])
+    old.end.emit()
+    qapp.processEvents()
+    win.add_commits.assert_called_once_with(['first'])
+    win.thread_end.assert_not_called()
+
+
 def test_set_labels_replaces_tags_and_branches(app_context):
     commit = _commit_for_columns(app_context)
     commit.set_labels(' (HEAD -> refs/heads/main, tag: refs/tags/v1, refs/remotes/o/x)')

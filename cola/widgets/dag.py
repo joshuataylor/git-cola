@@ -2923,6 +2923,8 @@ class GitDAG(standard.MainWindow):
         """Previous revision scopes, pushed on re-scope and popped by navigate_back"""
 
         self.thread = None
+        self._stopping_threads = set()
+        """Replaced readers still finishing, kept alive until they do"""
         self.revtext = GitDagLineEdit(context)
         self.maxresults = standard.SpinBox(digits=None, maxi=9999999, wrap=True)
 
@@ -3257,7 +3259,6 @@ class GitDAG(standard.MainWindow):
         self.treewidget.setFocus()
 
     def set_params(self, params):
-        context = self.context
         self.params = params
         # A fresh set of params starts a new navigation context.
         self._scope_history = []
@@ -3267,11 +3268,21 @@ class GitDAG(standard.MainWindow):
         self.update_window_title()
 
         self._stop_reader_thread()
-        self.thread = ReaderThread(context, params)
-        self.thread.begin.connect(self.thread_begin, type=Qt.QueuedConnection)
-        self.thread.status.connect(self.thread_status, type=Qt.QueuedConnection)
-        self.thread.add.connect(self.add_commits, type=Qt.QueuedConnection)
-        self.thread.end.connect(self.thread_end, type=Qt.QueuedConnection)
+        self.thread = self._new_reader_thread()
+
+    def _new_reader_thread(self):
+        """Create a reader whose signals only count while it is self.thread"""
+        thread = ReaderThread(self.context, self.params)
+
+        def current(func):
+            # A replaced reader can still have queued signals on their way.
+            return lambda *args: func(*args) if thread is self.thread else None
+
+        thread.begin.connect(current(self.thread_begin), type=Qt.QueuedConnection)
+        thread.status.connect(current(self.thread_status), type=Qt.QueuedConnection)
+        thread.add.connect(current(self.add_commits), type=Qt.QueuedConnection)
+        thread.end.connect(current(self.thread_end), type=Qt.QueuedConnection)
+        return thread
 
     def _stop_reader_thread(self):
         """Stop the reader thread if it is currently running"""
@@ -3279,6 +3290,23 @@ class GitDAG(standard.MainWindow):
             self.thread.requestInterruption()
             QtCore.QThread.currentThread().yieldCurrentThread()
             self.thread.wait(100)
+
+    def _start_reader_thread(self):
+        """Start reading, with a fresh reader if the last one is still stopping
+
+        QThread.start() does nothing while the thread runs, and a reader can
+        take longer than _stop_reader_thread() waits: git's first line of a
+        --topo-order or -S query, or the graph build over a long history. The
+        new query was then silently dropped.
+        """
+        old = self.thread
+        if old.isRunning():
+            # Keep the old reader alive until it notices the interruption:
+            # destroying a running QThread aborts the process.
+            self._stopping_threads.add(old)
+            old.finished.connect(lambda: self._stopping_threads.discard(old))
+            self.thread = self._new_reader_thread()
+        self.thread.start()
 
     def _display_worktree_status(self, enabled):
         """Enable and disable the display of the WORKTREE and STAGE pseudo-commits"""
@@ -3520,7 +3548,7 @@ class GitDAG(standard.MainWindow):
             self.params.set_ref(ref)
             self.params.set_count(count)
             self.params.set_display_status(display_status)
-            self.thread.start()
+            self._start_reader_thread()
 
         self.old_oids = oids
         self.old_count = count
