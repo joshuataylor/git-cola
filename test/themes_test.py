@@ -78,3 +78,14 @@ def test_flat_dark_theme_sets_dark_window_chrome_on_macos(monkeypatch):
     themes.apply_window_appearance(flat_light)
     themes.apply_window_appearance(by_name['default'])
     assert fake.applied == ['DarkAqua', 'Aqua']
+
+
+def test_platform_theme_is_applied_by_name(monkeypatch):
+    """apply_platform_theme() takes the theme's name, as app.py passes it"""
+    fake = _FakeAppKit()
+    monkeypatch.setattr(themes, 'AppKit', fake)
+    monkeypatch.setattr(themes.core, 'IS_DARWIN', True)
+    themes.apply_platform_theme('macos-aqua-dark')
+    themes.apply_platform_theme('macos-vibrant-light')
+    themes.apply_platform_theme('flat-dark-blue')  # not a macOS theme
+    assert fake.applied == ['DarkAqua', 'Aqua']
