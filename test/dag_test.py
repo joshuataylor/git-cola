@@ -1171,16 +1171,28 @@ class _SyncRunTask:
 
 
 def _git_find_tree(app_context, monkeypatch, found):
-    """A find bar whose git searches return found[kind] for the needle"""
+    """A find bar whose git searches return found[kind][needle]"""
     tree, find, items = _find_tree(app_context, git=True)
     calls = []
+    searches = []
 
-    def fake_git(context, oids, needle, kind, case_sensitive=False):
-        calls.append((needle, kind, case_sensitive, len(oids)))
-        return set(found.get(kind, {}).get(needle, ()))
+    class FakeSearch:
+        def __init__(self, context, oids, needle, kind, case_sensitive=False):
+            self.args = (needle, kind, case_sensitive, len(oids))
+            self.cancelled = False
+            searches.append(self)
 
-    monkeypatch.setattr(dag_widgets, 'find_commits_with_git', fake_git)
+        def run(self):
+            calls.append(self.args)
+            needle, kind = self.args[:2]
+            return set(found.get(kind, {}).get(needle, ()))
+
+        def cancel(self):
+            self.cancelled = True
+
+    monkeypatch.setattr(dag_widgets, 'GitFindSearch', FakeSearch)
     find._runtask = _SyncRunTask()
+    find._searches_made = searches
     # Only the tests' own timeout.emit() starts a search: the real interval
     # can expire inside processEvents() and make the test depend on timing.
     find._git_timer.setInterval(3600 * 1000)
@@ -1276,17 +1288,10 @@ def test_commit_find_adds_git_matches_after_typing_pauses(
     qapp, app_context, monkeypatch
 ):
     """Full-message and changed-file matches join the in-memory ones"""
-    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, {})
-    by_message = items[2].commit.oid
-    by_file = items[5].commit.oid
-    found = {'message': {'fix': {by_message}}, 'files': {'fix': {by_file}}}
-    monkeypatch.setattr(
-        dag_widgets,
-        'find_commits_with_git',
-        lambda context, oids, needle, kind, case_sensitive=False: (
-            calls.append((needle, kind)) or set(found[kind].get(needle, ()))
-        ),
-    )
+    found = {'message': {}, 'files': {}}
+    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, found)
+    found['message']['fix'] = {items[2].commit.oid}
+    found['files']['fix'] = {items[5].commit.oid}
 
     find.text.setText('fix')
     # The summaries match at once, and git runs once typing pauses.
@@ -1296,7 +1301,7 @@ def test_commit_find_adds_git_matches_after_typing_pauses(
     assert find._git_timer.isActive()
 
     find._git_timer.timeout.emit()
-    assert sorted(kind for _needle, kind in calls) == ['files', 'message']
+    assert sorted(call[1] for call in calls) == ['files', 'message']
     assert find.count_label.text() == '1/5'
     # The selection stays on the in-memory match, and Next reaches git's.
     find.search()
@@ -1378,6 +1383,67 @@ def test_commit_find_skips_git_for_short_text_and_unchecked_boxes(
     qapp.processEvents()  # checkbox clicks are queued
     assert not find._git_timer.isActive()
     assert find.count_label.text() == '1/3'
+
+
+def test_commit_find_stops_searches_it_no_longer_needs(qapp, app_context, monkeypatch):
+    """Changing the text, reloading or closing stops the running git searches"""
+    tree, find, _items, _calls = _git_find_tree(app_context, monkeypatch, {})
+    find.text.setText('first')
+    find._runtask = MagicMock()  # leave the searches "running"
+    find._git_timer.timeout.emit()
+    first = list(find._searches_made)
+    assert len(first) == 2
+    assert not any(search.cancelled for search in first)
+
+    find.text.setText('second')
+    assert all(search.cancelled for search in first)
+    find._git_timer.timeout.emit()
+    second = find._searches_made[2:]
+    find.show()
+    tree.commits_changed.emit()
+    assert all(search.cancelled for search in second)
+    find._git_timer.timeout.emit()
+    third = find._searches_made[4:]
+    find.hide_find()
+    assert all(search.cancelled for search in third)
+
+
+def test_git_find_search_cancel_stops_its_process(monkeypatch):
+    """cancel() before the start skips git, and after it kills the process"""
+    started = []
+
+    class FakeProc:
+        returncode = None
+
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+
+        def communicate(self, stdin):
+            search.cancel()  # the find bar stops it while git runs
+            self.returncode = -15
+            return b'', b''
+
+    def start_command(cmd, **kwargs):
+        started.append(cmd)
+        return proc
+
+    monkeypatch.setattr(dag_widgets.core, 'start_command', start_command)
+    search = dag_widgets.GitFindSearch(None, ['a' * 40], 'text', 'message')
+    search.cancel()
+    assert search.run() == set()
+    assert started == []
+
+    proc = FakeProc()
+    search = dag_widgets.GitFindSearch(None, ['a' * 40], 'text', 'files')
+    assert search.run() == set()
+    assert proc.terminated
+    assert started[0][:2] == ['git', 'log']
 
 
 def test_commit_find_escape_hides(qapp, app_context):

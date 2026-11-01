@@ -7,7 +7,9 @@ import functools
 import html
 import itertools
 import math
+import subprocess
 import sys
+import threading
 from functools import partial
 
 from qtpy import QtCore
@@ -2009,27 +2011,67 @@ def file_pathspec(needle, case_sensitive=False):
     return f':({magic})**/*{escaped}*'
 
 
-def find_commits_with_git(context, oids, needle, kind, case_sensitive=False):
-    """Return the oids, from oids, whose full message or changed paths match
-
-    kind is 'message' or 'files'. Only the given commits are read (--stdin
-    with --no-walk), so the cost follows the length of the list, not the
-    history: about 20 ms for 1000 commits by message, 300 ms by file.
-    """
-    if not oids or not needle:
-        return set()
-    args = ['--no-walk=unsorted', '--stdin', '--format=%H']
+def find_git_args(needle, kind, case_sensitive=False):
+    """The "git log" arguments that find commits by full message or changed path"""
+    args = ['log', '--no-walk=unsorted', '--stdin', '--format=%H']
     if kind == 'message':
         args += ['--fixed-strings', '--grep=' + needle]
         if not case_sensitive:
             args.append('--regexp-ignore-case')
     else:
         args += ['--', file_pathspec(needle, case_sensitive)]
-    stdin = ('\n'.join(oids) + '\n').encode('utf-8')
-    status, out, _ = context.git.log(*args, _input=stdin, _readonly=True)
-    if status != 0:
-        return set()
-    return set(out.split())
+    return args
+
+
+class GitFindSearch:
+    """One find-bar search by git, which the GUI thread can stop
+
+    Only the given commits are read (--stdin with --no-walk), so the cost
+    follows the length of the list, not the history: about 20 ms for 1000
+    commits by message and 300 ms by file, but 11 s by file for 50000. A
+    search the find bar no longer needs is stopped rather than left to run.
+    """
+
+    def __init__(self, context, oids, needle, kind, case_sensitive=False):
+        self.context = context
+        self.oids = oids
+        self.needle = needle
+        self.kind = kind
+        self.case_sensitive = case_sensitive
+        self.cancelled = False
+        self._proc = None
+        self._lock = threading.Lock()
+
+    def run(self):
+        """Return the oids whose full message (kind 'message') or paths match"""
+        if not self.oids or not self.needle:
+            return set()
+        cmd = ['git'] + find_git_args(self.needle, self.kind, self.case_sensitive)
+        with self._lock:
+            if self.cancelled:
+                return set()
+            try:
+                self._proc = proc = core.start_command(cmd, stderr=subprocess.DEVNULL)
+            except OSError:
+                return set()
+        stdin = ('\n'.join(self.oids) + '\n').encode('utf-8')
+        out, _ = proc.communicate(stdin)
+        if self.cancelled or proc.returncode != 0:
+            return set()
+        return set(core.decode(out).split())
+
+    def cancel(self):
+        """Stop the search, killing its git process if it has started"""
+        with self._lock:
+            self.cancelled = True
+            proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+
+def find_commits_with_git(context, oids, needle, kind, case_sensitive=False):
+    """Return the oids, from oids, whose full message or changed paths match"""
+    return GitFindSearch(context, oids, needle, kind, case_sensitive).run()
 
 
 def next_match(matches, row, backwards=False, inclusive=False):
@@ -2079,6 +2121,8 @@ class CommitFindWidget(QtWidgets.QWidget):
         self._git_oids = set()
         """Oids git matched for the current criteria"""
         self._git_pending = 0
+        self._searches = []
+        """The GitFindSearch objects of the current criteria, stopped when stale"""
         self._generation = 0
         """Bumped whenever the criteria or the commits change, to drop stale results"""
         self._origin_row = -1
@@ -2222,6 +2266,9 @@ class CommitFindWidget(QtWidgets.QWidget):
         self._git_timer.stop()
         self._git_oids = set()
         self._git_pending = 0
+        searches, self._searches = self._searches, []
+        for search in searches:
+            search.cancel()
 
     def _schedule_git_search(self):
         """Search with git once typing pauses"""
@@ -2246,9 +2293,9 @@ class CommitFindWidget(QtWidgets.QWidget):
         generation = self._generation
         context = self._tree.context
         for kind in kinds:
-            task = qtutils.SimpleTask(
-                find_commits_with_git, context, oids, needle, kind, case_sensitive
-            )
+            search = GitFindSearch(context, oids, needle, kind, case_sensitive)
+            self._searches.append(search)
+            task = qtutils.SimpleTask(search.run)
             self._runtask.start(
                 task,
                 result=lambda found: self._apply_git_matches(generation, found),
