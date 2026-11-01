@@ -128,6 +128,40 @@ def test_close_window_action_is_macos_only(qapp, tmp_path, monkeypatch):
         view.close()
 
 
+def test_dock_menu_lists_recent_repos_on_macos(qapp, tmp_path, monkeypatch):
+    """The Dock icon's menu opens a recent repository or a new window"""
+    monkeypatch.setattr(main_widget.core, 'IS_DARWIN', True)
+    view = _build_main_view(tmp_path, monkeypatch)
+    try:
+        settings = view.context.settings
+        monkeypatch.setattr(settings, 'load', lambda *_args: True)
+        settings.values['recent'] = [
+            {'name': 'other', 'path': '/src/other'},
+            {'name': 'here', 'path': view.context.git.worktree()},
+        ]
+        view.dock_menu.aboutToShow.emit()
+        texts = [action.text() for action in view.dock_menu.actions()]
+        assert texts == [
+            f'other {chr(0x2192)} /src/other',
+            '',
+            view.open_repo_new_action.text(),
+        ]
+        # Rebuilt each time it opens, not appended to.
+        view.dock_menu.aboutToShow.emit()
+        assert len(view.dock_menu.actions()) == 3
+    finally:
+        view.close()
+
+
+def test_dock_menu_is_macos_only(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(main_widget.core, 'IS_DARWIN', False)
+    view = _build_main_view(tmp_path, monkeypatch)
+    try:
+        assert view.dock_menu is None
+    finally:
+        view.close()
+
+
 def test_app_menu_actions_have_explicit_roles(main_view):
     """About/Preferences/Quit carry explicit macOS menu roles.
 
