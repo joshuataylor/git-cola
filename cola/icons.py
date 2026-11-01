@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 from . import core
 from . import decorators
@@ -46,11 +47,97 @@ KNOWN_FILE_EXTENSIONS = {
 }
 
 
-def install(themes: list[str]) -> None:
+# Set by install(): pick the light or dark icons from the palette at paint time.
+_follow_system = False
+# Whether the application palette is dark, cached until palette_changed().
+_palette_dark: bool | None = None
+
+
+def install(themes: list[str], follow_system: bool = False) -> None:
+    """Find icons in the themes' directories
+
+    With follow_system, the themes were picked from the system appearance
+    and cola's own icons switch between light and dark with the palette.
+    """
+    global _follow_system
     qtcompat.set_search_paths('icons', [])
     for theme in themes:
         icon_dir = resources.icon_dir(theme)
         qtcompat.add_search_path('icons', icon_dir)
+    _follow_system = follow_system
+    palette_changed()
+
+
+def palette_changed() -> None:
+    """Forget the palette's darkness, e.g. after a Light/Dark switch"""
+    global _palette_dark
+    _palette_dark = None
+
+
+def palette_is_dark() -> bool:
+    """Is the application palette dark? The same probe detect_system_theme() uses"""
+    global _palette_dark
+    if _palette_dark is None:
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return False
+        palette = app.palette()
+        window_text = palette.color(QtGui.QPalette.ColorRole.WindowText).lightness()
+        window = palette.color(QtGui.QPalette.ColorRole.Window).lightness()
+        _palette_dark = window_text > window
+    return _palette_dark
+
+
+class FollowSystemIconEngine(QtGui.QIconEngine):
+    """Draw one of cola's icons from the light or dark set, as the palette is now
+
+    Icons were loaded once from the set chosen at startup, so after a live
+    Light/Dark switch every icon stayed in the old set. Widgets repaint on a
+    palette change, and this engine draws the matching set then.
+    """
+
+    def __init__(self, basename: str) -> None:
+        super().__init__()
+        self._basename = basename
+        self._icons: dict[bool, QtGui.QIcon] = {}
+
+    def _icon(self) -> QtGui.QIcon:
+        dark = palette_is_dark()
+        qicon = self._icons.get(dark)
+        if qicon is None:
+            path = os.path.join(
+                resources.icon_dir('dark' if dark else 'light'), self._basename
+            )
+            if not core.exists(path):
+                path = os.path.join(resources.icon_dir('light'), self._basename)
+            qicon = QtGui.QIcon(path)
+            self._icons[dark] = qicon
+        return qicon
+
+    # Qt overrides
+    def paint(self, painter, rect, mode, state):
+        self._icon().paint(painter, rect, Qt.AlignCenter, mode, state)
+
+    def pixmap(self, size, mode, state):
+        return self._icon().pixmap(size, mode, state)
+
+    def scaledPixmap(self, size, mode, state, scale):
+        return self._icon().pixmap(size, scale, mode, state)
+
+    def actualSize(self, size, mode, state):
+        return self._icon().actualSize(size, mode, state)
+
+    def availableSizes(self, mode=QtGui.QIcon.Mode.Normal, state=QtGui.QIcon.State.Off):
+        return self._icon().availableSizes(mode, state)
+
+    def isNull(self):
+        return self._icon().isNull()
+
+    def clone(self):
+        return FollowSystemIconEngine(self._basename)
+
+    def key(self):
+        return 'cola-follow-system'
 
 
 def icon_themes() -> tuple[tuple[str, str], tuple[str, str], tuple[str, str]]:
@@ -73,12 +160,21 @@ def name_from_basename(basename: str) -> str:
 @decorators.memoize
 def from_name(name: str) -> QtGui.QIcon:
     """Return a QIcon from an absolute filename or "icons:basename.svg" name"""
+    prefix = 'icons:'
+    if _follow_system and name.startswith(prefix):
+        return from_engine(name[len(prefix) :])
     return QtGui.QIcon(name)
 
 
 def icon(basename: str) -> QtGui.QIcon:
     """Given a basename returns a QIcon from the corresponding cola icon"""
     return from_name(name_from_basename(basename))
+
+
+@decorators.memoize
+def from_engine(basename: str) -> QtGui.QIcon:
+    """Return a QIcon that follows the palette between the light and dark sets"""
+    return QtGui.QIcon(FollowSystemIconEngine(basename))
 
 
 @decorators.memoize
