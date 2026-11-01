@@ -36,7 +36,7 @@ class Theme:
         is_dark: bool,
         style_sheet: int = EStylesheet.DEFAULT,
         main_color: str | None = None,
-        macos_appearance: None = None,
+        macos_appearance: str | None = None,
     ) -> None:
         self.name = name
         self.title = title
@@ -765,8 +765,8 @@ def get_all_themes() -> list[Theme]:
     return themes
 
 
-def apply_platform_theme(theme: Theme) -> None:
-    """Apply platform-specific themes (e.g. dark mode on macOS)"""
+def apply_platform_theme(theme_name: str) -> None:
+    """Apply a macOS theme, named e.g. "macos-aqua-dark", to the app's appearance"""
     # https://developer.apple.com/documentation/appkit/nsappearancecustomization/choosing_a_specific_appearance_for_your_macos_app
     # https://github.com/git-cola/git-cola/issues/905#issuecomment-461118465
     if core.IS_DARWIN:
@@ -775,7 +775,7 @@ def apply_platform_theme(theme: Theme) -> None:
         app = AppKit.NSApplication.sharedApplication()
         macos_themes = get_macos_themes()
         try:
-            macos_appearance = macos_themes[theme].macos_appearance
+            macos_appearance = macos_themes[theme_name].macos_appearance
         except KeyError:
             return
         if macos_appearance is None:
