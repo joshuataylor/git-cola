@@ -56,12 +56,12 @@ class CommitFactory:
     ) -> Commit:
         if not oid and log_entry:
             oid = log_entry[: context.model.oid_len]
-        try:
-            commit = self.commits[oid]
+        commit = self.commits.get(oid)
+        if commit is not None:
             if log_entry and not commit.parsed:
                 commit.parse(log_entry, factory=self)
             self.root_generation = max(commit.generation, self.root_generation)
-        except KeyError:
+        else:
             commit = Commit(context, oid=oid, log_entry=log_entry, factory=self)
             if not log_entry:
                 self.root_generation += 1
@@ -184,7 +184,10 @@ class Commit:
         if factory is None:
             factory = _default_factory
         oid_len = self.context.model.oid_len
-        self.oid = log_entry[:oid_len]
+        oid = log_entry[:oid_len]
+        # Keep the copy the factory already holds as its key.
+        if self.oid != oid:
+            self.oid = oid
         after_oid = log_entry[oid_len + 1 :]
         details = after_oid.split(sep, 10)
         (
@@ -400,10 +403,8 @@ class RepoReader:
             for log_entry in reversed(log_entries):
                 if not log_entry:
                     continue
-                oid = log_entry[:oid_len]
-                try:
-                    commit = self._objects[oid]
-                except KeyError:
+                commit = self._objects.get(log_entry[:oid_len])
+                if commit is None:
                     try:
                         commit = self._factory.new(self.context, log_entry=log_entry)
                     except (KeyError, ValueError):
