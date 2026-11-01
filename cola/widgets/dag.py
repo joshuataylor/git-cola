@@ -289,7 +289,7 @@ class ViewerMixin:
         oids = self.selected_oids_for_copy()
         if not oids:
             return
-        messages = [commit_message(self.context, oid, unwrap=unwrap) for oid in oids]
+        messages = commit_messages(self.context, oids, unwrap=unwrap)
         qtutils.set_clipboard('\n\n'.join(msg for msg in messages if msg))
 
     def checkout_branch(self):
@@ -578,7 +578,39 @@ def commit_message(context, oid, unwrap=False):
     while the subject line is left untouched.
     """
     message = gitcmds.log(context, '-1', oid, '--', pretty='format:%B').strip()
-    if not unwrap or not message:
+    return _unwrap_message(message) if unwrap else message
+
+
+def commit_messages(context, oids, unwrap=False):
+    """Return the full messages of the commits, in order, with one git call
+
+    Copying the messages of a large selection ran "git log -1" per commit on
+    the GUI thread. The STAGE and WORKTREE rows have no message.
+    """
+    oids = [oid for oid in oids if oid not in (dag.STAGE, dag.WORKTREE)]
+    if not oids:
+        return []
+    out = gitcmds.log(
+        context,
+        '--no-walk=unsorted',
+        '--stdin',
+        '--no-show-signature',
+        pretty='format:%B%x00',
+        _input=('\n'.join(oids) + '\n').encode('utf-8'),
+    )
+    messages = out.split('\0')
+    # git rejects the whole batch when one oid is bad: ask one at a time.
+    if len(messages) < len(oids):
+        return [commit_message(context, oid, unwrap=unwrap) for oid in oids]
+    messages = [message.strip() for message in messages[: len(oids)]]
+    if unwrap:
+        messages = [_unwrap_message(message) for message in messages]
+    return messages
+
+
+def _unwrap_message(message):
+    """Join the body paragraphs into single lines, leaving the subject alone"""
+    if not message:
         return message
     subject, sep, body = message.partition('\n')
     return subject + sep + textwrap.unwrap(body)
