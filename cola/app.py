@@ -334,7 +334,7 @@ class ColaApplication:
         self._app.setDesktopFileName('git-cola')
         self._install_style(gui_theme)
 
-    def _install_style(self, theme_str: None) -> None:
+    def _install_style(self, theme_str: str | None) -> None:
         """Generate and apply a stylesheet to the app"""
         if theme_str is None:
             theme_str = self.context.cfg.get('cola.theme', default='default')
