@@ -1598,6 +1598,8 @@ class CommitTreeWidgetItem(QtWidgets.QTreeWidgetItem):
         """
         QtWidgets.QTreeWidgetItem.__init__(self, parent)
         self.commit = commit
+        self.position = 0
+        """Index of the commit in CommitTreeWidget.commits, which gives its row"""
         for idx, column in columns:
             column.render(self, idx, commit, renderer)
 
@@ -1645,6 +1647,8 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.menu_actions = None
         self.selecting = False
         self.commits = []
+        self._selected_oids = frozenset()
+        """The oids this list shows as selected, to skip the echo of its own selection"""
         self._column_init_state = ColumnInitState.NONE
         self.action_up = qtutils.add_action(
             self, N_('Go Up'), self.go_up, hotkeys.MOVE_UP
@@ -1884,44 +1888,51 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
     def selection_changed(self):
         """Respond to itemSelectionChanged notifications"""
         items = self.selected_items()
-        if not items:
-            self.set_selecting(True)
-            self.commits_selected.emit([])
-            self.set_selecting(False)
-            return
+        commits = sort_by_generation([i.commit for i in items]) if items else []
+        self._selected_oids = frozenset(commit.oid for commit in commits)
         self.set_selecting(True)
-        self.commits_selected.emit(sort_by_generation([i.commit for i in items]))
+        self.commits_selected.emit(commits)
         self.set_selecting(False)
 
     def select_commits(self, commits):
         """Select commits that were selected by the sibling tree/graph widget"""
-        if self.selecting:
+        # Every selection comes back here through GitDAG.commits_selected,
+        # including this list's own. The connections are queued, so the
+        # "selecting" flag is already False by then: compare the oids instead.
+        if self.selecting or self._selected_oids == {c.oid for c in commits}:
             return
         with qtutils.BlockSignals(self):
             self.select([commit.oid for commit in commits])
 
     def select(self, oids):
         """Mark items as selected"""
-        self.clearSelection()
-        if not oids:
+        items = [self.oidmap[oid] for oid in oids if oid in self.oidmap]
+        self._selected_oids = frozenset(item.commit.oid for item in items)
+        if not items:
+            self.clearSelection()
             return
-        current = None
-        for oid in oids:
-            try:
-                item = self.oidmap[oid]
-            except KeyError:
-                continue
-            self.scrollToItem(item)
-            item.setSelected(True)
-            if current is None:
-                current = item
-        # setSelected() leaves the current index behind, so arrow keys and
-        # Shift+click would continue from the previously clicked row. Move it
-        # (and with it the Shift+click anchor) without changing the selection.
-        if current is not None:
-            self.selectionModel().setCurrentIndex(
-                self.indexFromItem(current), QtCore.QItemSelectionModel.NoUpdate
-            )
+        # Select runs of rows as ranges in a single call. setSelected() per
+        # item merged each row into the selection model, which is quadratic:
+        # 2.5 s for 5000 commits and 389 s for 50000. Rows are in reverse
+        # order of self.commits (add_commits() inserts each chunk at the top).
+        last = len(self.commits) - 1
+        model = self.model()
+        selection = QtCore.QItemSelection()
+        rows = sorted({last - item.position for item in items})
+        for start, end in row_runs(rows):
+            selection.select(model.index(start, 0), model.index(end, 0))
+        selection_model = self.selectionModel()
+        selection_model.select(
+            selection,
+            QtCore.QItemSelectionModel.ClearAndSelect | QtCore.QItemSelectionModel.Rows,
+        )
+        # Move the current index (and with it the Shift+click anchor) to the
+        # first commit, so arrow keys continue from the new selection.
+        selection_model.setCurrentIndex(
+            model.index(last - items[0].position, 0),
+            QtCore.QItemSelectionModel.NoUpdate,
+        )
+        self.scrollToItem(items[-1])
 
     def clear(self):
         """Clear the tree"""
@@ -1929,6 +1940,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self.oidmap.clear()
         self._message_tooltips.clear()
         self.commits = []
+        self._selected_oids = frozenset()
         self.commits_changed.emit()
 
     def event(self, event):
@@ -1963,14 +1975,17 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
 
     def add_commits(self, commits):
         """Add commits to the tree"""
+        base = len(self.commits)
         self.commits.extend(commits)
         items = []
         head = 'HEAD'
         head_oid = None
         renderer = CommitRenderer(self.context)
         columns = self.visible_columns()
-        for commit in reversed(commits):
+        for offset in range(len(commits) - 1, -1, -1):
+            commit = commits[offset]
             item = CommitTreeWidgetItem(commit, columns, renderer)
+            item.position = base + offset
             items.append(item)
             self.oidmap[commit.oid] = item
             for tag in commit.tags:
@@ -3800,6 +3815,8 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.menu_actions = None
         self.commits = []
         self.items = {}
+        self._selected_oids = frozenset()
+        """The oids this graph shows as selected, to skip the echo of its own selection"""
         self.mouse_start = [0, 0]
         self.saved_matrix = self.transform()
         self.max_column = 0
@@ -3896,6 +3913,7 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.x_offsets.clear()
         self.x_min = 24
         self.commits = []
+        self._selected_oids = frozenset()
 
     # ViewerMixin interface
     def selected_items(self):
@@ -3912,12 +3930,15 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         # Broadcast selection to other widgets
         selected_items = self.scene().selectedItems()
         commits = sort_by_generation([item.commit for item in selected_items])
+        self._selected_oids = frozenset(commit.oid for commit in commits)
         self.set_selecting(True)
         self.commits_selected.emit(commits)
         self.set_selecting(False)
 
     def select_commits(self, commits):
-        if self.selecting:
+        # The graph's own selection comes back through the queued
+        # GitDAG.commits_selected after "selecting" is reset: skip it.
+        if self.selecting or self._selected_oids == {c.oid for c in commits}:
             return
         with qtutils.BlockSignals(self.scene()):
             self.select([commit.oid for commit in commits])
@@ -3925,14 +3946,20 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
     def select(self, oids):
         """Select the item for the oids"""
         self.scene().clearSelection()
+        last = None
+        selected = set()
         for oid in oids:
             try:
                 item = self.items[oid]
             except KeyError:
                 continue
             item.setSelected(True)
-            item_rect = item.sceneTransform().mapRect(item.boundingRect())
-            self.ensureVisible(item_rect)
+            selected.add(item.commit.oid)
+            last = item
+        self._selected_oids = frozenset(selected)
+        # Scroll once: each ensureVisible() can scroll, and only the last counts.
+        if last is not None:
+            self.ensureVisible(last.sceneTransform().mapRect(last.boundingRect()))
 
     def _get_item_by_generation(self, commits, criteria_func):
         """Return the item for the commit matching criteria"""
@@ -4590,6 +4617,21 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
             xratio = yratio = max(xratio, yratio)
         self.scale(xratio, yratio)
         self.centerOn(rect.center())
+
+
+def row_runs(rows):
+    """Yield (first, last) for each run of consecutive rows in sorted rows"""
+    start = prev = None
+    for row in rows:
+        if start is None:
+            start = prev = row
+        elif row == prev + 1:
+            prev = row
+        else:
+            yield start, prev
+            start = prev = row
+    if start is not None:
+        yield start, prev
 
 
 def sort_by_generation(commits):
