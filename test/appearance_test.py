@@ -119,3 +119,95 @@ def test_diff_line_numbers_change_event_refreshes_on_palette_change(qapp):
     numbers.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
 
     numbers.refresh_palette.assert_called_once()
+
+
+def _live_theme_app(monkeypatch, config):
+    """A ColaApplication whose theme calls are recorded, config from a dict"""
+    calls = []
+    monkeypatch.setattr(
+        cola_app.themes,
+        'apply_window_appearance',
+        lambda theme: calls.append(('window', theme.name)),
+    )
+    monkeypatch.setattr(
+        cola_app.themes,
+        'apply_platform_theme',
+        lambda name: calls.append(('platform', name)),
+    )
+    monkeypatch.setattr(
+        cola_app.themes,
+        'reset_platform_appearance',
+        lambda: calls.append(('reset appearance',)),
+    )
+    cola = cola_app.ColaApplication.__new__(cola_app.ColaApplication)
+    cola.context = MagicMock()
+    cola.context.cfg.get = lambda key, default=None: config.get(key, default)
+    cola._app = MagicMock()
+    cola._app.palette.return_value = QtGui.QPalette()
+    cola._app.setPalette.side_effect = lambda palette: calls.append(
+        ('palette', palette == QtGui.QPalette())
+    )
+    cola.theme = None
+    cola._palette_set = False
+    cola._appearance_set = False
+    return cola, calls
+
+
+def test_theme_change_applies_without_a_restart(qapp, monkeypatch):
+    """Changing cola.theme re-themes the running app"""
+    config = {'cola.theme': 'default'}
+    cola, calls = _live_theme_app(monkeypatch, config)
+    cola._install_style(None)
+    assert calls == []
+
+    config['cola.theme'] = 'flat-dark-blue'
+    cola._config_changed('cola.theme', 'flat-dark-blue')
+    assert cola.theme.name == 'flat-dark-blue'
+    assert calls == [('palette', False), ('window', 'flat-dark-blue')]
+
+    # Back to the default: the flat theme's palette and appearance are undone.
+    del calls[:]
+    config['cola.theme'] = 'default'
+    cola._config_changed('cola.theme', 'default')
+    assert cola.theme.name == 'default'
+    assert calls == [('palette', True), ('reset appearance',)]
+    assert not cola._palette_set
+    assert not cola._appearance_set
+
+
+def test_other_config_changes_leave_the_theme_alone(qapp, monkeypatch):
+    cola, calls = _live_theme_app(monkeypatch, {'cola.theme': 'default'})
+    cola._install_style = MagicMock()
+    cola._config_changed('cola.tabwidth', 4)
+    cola._install_style.assert_not_called()
+    cola._config_changed('cola.boldfonts', True)
+    cola._install_style.assert_called_once_with(None)
+
+
+def test_switching_between_dark_themes_keeps_the_appearance(qapp, monkeypatch):
+    """A theme that sets the appearance anyway doesn't reset it first
+
+    Each appearance change announces a palette change, which re-themes the
+    app, so resetting and setting it again would theme it twice.
+    """
+    config = {'cola.theme': 'flat-dark-blue'}
+    cola, calls = _live_theme_app(monkeypatch, config)
+    cola._install_style(None)
+    del calls[:]
+    config['cola.theme'] = 'macos-aqua-dark'
+    cola._config_changed('cola.theme', 'macos-aqua-dark')
+    assert calls == [('palette', True), ('platform', 'macos-aqua-dark')]
+    assert cola._appearance_set
+    assert not cola._palette_set
+
+
+def test_refresh_system_appearance_rebuilds_macos_themes():
+    """The macOS themes' palette arrives after the appearance they set"""
+    cola = cola_app.ColaApplication.__new__(cola_app.ColaApplication)
+    cola.context = MagicMock()
+    cola.context.cfg.get.return_value = 'macos-aqua-dark'
+    cola._install_style = MagicMock()
+
+    cola.refresh_system_appearance()
+
+    cola._install_style.assert_called_once_with(None)
