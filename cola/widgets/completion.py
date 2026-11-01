@@ -1,5 +1,4 @@
 import re
-import time
 
 from qtpy import QtCore
 from qtpy import QtGui
@@ -496,7 +495,10 @@ class CompletionModel(QtGui.QStandardItemModel):
             items.append(item)
 
         from_filename = icons.from_filename
-        for match in matched_paths:
+        # A QStandardItem and an icon per path, built here on the GUI thread,
+        # cost 70-80 ms per keystroke with 64k tracked files. Typing more
+        # narrows the list, so the first matches are enough.
+        for match in matched_paths[:MAX_PATH_COMPLETIONS]:
             item = QStandardItem()
             item.setText(match)
             if match in dirs:
@@ -552,14 +554,69 @@ def filter_matches(match_text, candidates, case_sensitive, sort_key=None):
     return matches
 
 
+# The most paths a completion popup lists.
+MAX_PATH_COMPLETIONS = 1000
+
+
+class PathCandidates:
+    """Files and their parent directories, sorted once for repeated filtering"""
+
+    def __init__(self, file_list):
+        files = set(file_list)
+        self.files_and_dirs = utils.add_parents(files)
+        self.dirs = self.files_and_dirs.difference(files)
+        self._sorted = None
+        self._sorted_lower = None
+        self._lowered = None
+
+    def match(self, match_text, case_sensitive):
+        """The paths containing match_text, in the order filter_matches() sorts"""
+        if case_sensitive:
+            if self._sorted is None:
+                self._sorted = sorted(self.files_and_dirs)
+            if not match_text:
+                return list(self._sorted)
+            return [path for path in self._sorted if match_text in path]
+        if self._sorted_lower is None:
+            self._sorted_lower = sorted(self.files_and_dirs, key=_lower)
+            self._lowered = [path.lower() for path in self._sorted_lower]
+        if not match_text:
+            return list(self._sorted_lower)
+        match_text = match_text.lower()
+        return [
+            path
+            for path, lowered in zip(self._sorted_lower, self._lowered)
+            if match_text in lowered
+        ]
+
+
+# id(file_list) -> (file_list, len(file_list), PathCandidates). Holding the list
+# keeps its id from being reused while the entry exists.
+_path_candidates_cache = {}
+
+
+def path_candidates(file_list):
+    """Return the PathCandidates for file_list, reusing them while it is unchanged
+
+    The completion models keep one list of tracked paths until the next
+    refresh, and rebuilding the parents and sorting them on every keystroke
+    took 0.13 s for 64k files.
+    """
+    key = id(file_list)
+    cached = _path_candidates_cache.get(key)
+    if cached is not None and cached[0] is file_list and cached[1] == len(file_list):
+        return cached[2]
+    candidates = PathCandidates(file_list)
+    if len(_path_candidates_cache) >= 8:
+        _path_candidates_cache.clear()
+    _path_candidates_cache[key] = (file_list, len(file_list), candidates)
+    return candidates
+
+
 def filter_path_matches(match_text, file_list, case_sensitive):
     """Return matching completions from a list of candidate files"""
-    files = set(file_list)
-    files_and_dirs = utils.add_parents(files)
-    dirs = files_and_dirs.difference(files)
-
-    paths = filter_matches(match_text, files_and_dirs, case_sensitive)
-    return (paths, dirs)
+    candidates = path_candidates(file_list)
+    return (candidates.match(match_text, case_sensitive), candidates.dirs)
 
 
 class Completer(QtWidgets.QCompleter):
@@ -713,15 +770,22 @@ class GitTrackedCompletionModel(GitPathCompletionModel):
 
     def __init__(self, context, parent):
         GitPathCompletionModel.__init__(self, context, parent)
-        self.model_updated.connect(self.gather_paths, type=Qt.QueuedConnection)
+        # Re-read the paths when they are next needed, not on every refresh:
+        # this ran "git ls-files" on the GUI thread for each model update.
+        self.model_updated.connect(self._mark_paths_stale, type=Qt.QueuedConnection)
         self._paths = []
+        self._paths_stale = True
+
+    def _mark_paths_stale(self):
+        self._paths_stale = True
 
     def gather_paths(self):
         context = self.context
         self._paths = gitcmds.tracked_files(context)
 
     def gather_matches(self, case_sensitive):
-        if not self._paths:
+        if self._paths_stale or not self._paths:
+            self._paths_stale = False
             self.gather_paths()
 
         refs = []
@@ -747,12 +811,12 @@ class GitLogCompletionModel(GitRefCompletionModel):
     def __init__(self, context, parent):
         GitRefCompletionModel.__init__(self, context, parent)
         self._paths = []
+        self._paths_stale = True
         self._model = context.model
-        self._runtask = qtutils.RunTask(parent=self)
-        self._time = 0.0  # ensure that the first event runs a task.
-        self.model_updated.connect(
-            self._start_gathering_paths, type=Qt.QueuedConnection
-        )
+        # Re-read the paths when the completer next needs them, on its own
+        # thread: this ran "git ls-files" and a sort of every tracked path
+        # after each refresh, whether or not anyone was completing.
+        self.model_updated.connect(self._mark_paths_stale, type=Qt.QueuedConnection)
 
     def matches(self):
         """Return candidate values for completion"""
@@ -792,25 +856,20 @@ class GitLogCompletionModel(GitRefCompletionModel):
             '@{upstream}',
         ] + matches
 
-    def _start_gathering_paths(self):
-        """Gather paths when the model changes"""
-        # Debounce updates that land within 1 second of each other.
-        if time.time() - self._time > 1.0:
-            self._runtask.start(qtutils.SimpleTask(self.gather_paths))
-        self._time = time.time()
+    def _mark_paths_stale(self):
+        self._paths_stale = True
 
     def gather_paths(self):
         """Gather paths and store them in the model"""
-        self._time = time.time()
         if self._model.cfg.get(prefs.AUTOCOMPLETE_PATHS, True):
             self._paths = gitcmds.tracked_files(self.context)
         else:
             self._paths = []
-        self._time = time.time()
 
     def gather_matches(self, case_sensitive):
         """Filter paths and refs to find matching entries"""
-        if not self._paths:
+        if self._paths_stale or not self._paths:
+            self._paths_stale = False
             self.gather_paths()
         refs = filter_matches(
             self.match_text, self.matches(), case_sensitive, sort_key=ref_sort_key
