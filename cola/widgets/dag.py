@@ -1967,7 +1967,8 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         Used when GitHub verification arrives after the commits were displayed.
         """
         idx = self.column_index('signature')
-        if idx is None:
+        # A hidden column is rendered in full when it is shown.
+        if idx is None or self.isColumnHidden(idx):
             return
         column = self.columns[idx]
         renderer = CommitRenderer(self.context)
@@ -2908,7 +2909,8 @@ class GitDAG(standard.MainWindow):
         self._github_busy = False
         self._signatures = {}
         """(status, signer, key) keyed by oid, retained across refreshes"""
-        self._signature_queue = []
+        self._signature_queue = {}
+        """Oids still to verify, in order (a dict, for O(1) removal)"""
         """Commits still waiting to be verified, nearest the viewport first"""
         self._signature_busy = False
         self._stopping = False
@@ -3662,6 +3664,8 @@ class GitDAG(standard.MainWindow):
         else:
             commits = chunk
         self.commit_list.extend(commits)
+        if prefs.dag_show_signatures(self.context):
+            self._apply_known_signatures(commits)
         # Keep track of commits
         for commit_obj in commits:
             self.commits[commit_obj.oid] = commit_obj
@@ -3727,20 +3731,27 @@ class GitDAG(standard.MainWindow):
         """
         if self._stopping or not prefs.dag_show_signatures(self.context):
             return
-        known = []
-        pending = []
-        for commit in self.commit_list:
-            signature = self._signatures.get(commit.oid)
-            if signature is None:
-                pending.append(commit.oid)
-            else:
-                commit.signature, commit.signer, commit.signing_key = signature
-                known.append(commit.oid)
-        self._signature_queue = pending
-        if known:
-            self.update_signatures(known)
-            self.verify_with_github()
+        # add_commits() already gave the commits their known signatures, before
+        # their rows were built: re-rendering them all here took 180-570 ms
+        # on every reload of 50000 verified commits.
+        signatures = self._signatures
+        self._signature_queue = dict.fromkeys(
+            commit.oid for commit in self.commit_list if commit.oid not in signatures
+        )
+        self.verify_with_github()
         self.request_signatures()
+
+    def _apply_known_signatures(self, commits):
+        """Give commits the signatures and GitHub verdicts already known"""
+        signatures = self._signatures
+        verified = self._github_verified
+        for commit in commits:
+            signature = signatures.get(commit.oid)
+            if signature is not None:
+                commit.signature, commit.signer, commit.signing_key = signature
+            verification = verified.get(commit.oid)
+            if verification is not None:
+                commit.github_verification = verification
 
     def should_stop_verification(self):
         """Poll for shutdown; called from the background worker threads"""
@@ -3754,18 +3765,18 @@ class GitDAG(standard.MainWindow):
         """
         self._stopping = True
         self._signature_timer.stop()
-        self._signature_queue = []
+        self._signature_queue = {}
 
     def request_signatures(self):
         """Verify the commits that are on screen, then work through the rest"""
         if self._stopping or self._signature_busy or not self._signature_queue:
             return
-        visible = set(self.treewidget.visible_oids())
-        batch = [oid for oid in self._signature_queue if oid in visible]
+        queue = self._signature_queue
+        batch = [oid for oid in self.treewidget.visible_oids() if oid in queue]
         if not batch:
             # Nothing on screen is outstanding; keep chipping away at the rest
             # so the column eventually fills in for the whole history.
-            batch = self._signature_queue
+            batch = list(itertools.islice(queue, SIGNATURE_BATCH_SIZE))
         batch = batch[:SIGNATURE_BATCH_SIZE]
 
         self._signature_busy = True
@@ -3780,10 +3791,9 @@ class GitDAG(standard.MainWindow):
         self._signature_busy = False
         if self._stopping:
             return
-        requested = set(oids)
-        self._signature_queue = [
-            oid for oid in self._signature_queue if oid not in requested
-        ]
+        queue = self._signature_queue
+        for oid in oids:
+            queue.pop(oid, None)
         updated = []
         for oid in oids:
             # Commits that Git did not report back are recorded as unsigned so
@@ -3819,19 +3829,16 @@ class GitDAG(standard.MainWindow):
         if repository is None:
             return
 
-        cached_oids = []
-        pending_oids = []
-        for commit in self.commit_list:
-            verification = self._github_verified.get(commit.oid)
-            if verification is not None:
-                commit.github_verification = verification
-                cached_oids.append(commit.oid)
-            elif commit.signature and commit.signature != 'N':
-                # Only signed commits have anything for GitHub to verify.
-                pending_oids.append(commit.oid)
-
-        if cached_oids:
-            self.update_signatures(cached_oids)
+        # Commits carry their cached verdicts from add_commits(). Re-rendering
+        # all of them here ran after every 64-commit batch.
+        verified = self._github_verified
+        pending_oids = [
+            commit.oid
+            for commit in self.commit_list
+            if commit.signature
+            and commit.signature != 'N'  # only signed commits can be verified
+            and commit.oid not in verified
+        ]
         if not pending_oids:
             return
 

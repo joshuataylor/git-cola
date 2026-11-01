@@ -1280,6 +1280,113 @@ def test_a_second_reader_does_not_disturb_one_in_progress(app_context):
             assert commit in parent.children
 
 
+def _signature_dag(app_context, monkeypatch, count=6):
+    """A GitDAG stand-in with commits for the signature verification code"""
+    monkeypatch.setattr(dag_widgets.prefs, 'dag_show_signatures', lambda _ctx: True)
+    monkeypatch.setattr(dag_widgets.prefs, 'dag_github_verification', lambda _ctx: True)
+    win = GitDAG.__new__(GitDAG)
+    win.context = app_context
+    win.commit_list = [
+        _commit_for_graph(app_context, f'{idx:040x}') for idx in range(count)
+    ]
+    win.commits = {commit.oid: commit for commit in win.commit_list}
+    win._stopping = False
+    win._signatures = {}
+    win._signature_queue = {}
+    win._signature_busy = False
+    win._signature_timer = MagicMock()
+    win._github_verified = {}
+    win._github_busy = False
+    win._github_disabled = False
+    win.update_signatures = MagicMock()
+    win.treewidget = MagicMock()
+    win.treewidget.visible_oids.return_value = []
+    return win
+
+
+def test_known_signatures_are_applied_before_rows_not_re_rendered(
+    app_context, monkeypatch
+):
+    """Re-rendering every known signature took 180-570 ms per 50k reload"""
+    win = _signature_dag(app_context, monkeypatch)
+    first, second = win.commit_list[:2]
+    win._signatures[first.oid] = ('G', 'Signer', 'KEY')
+    win._github_verified[second.oid] = {'verified': True}
+
+    win._apply_known_signatures(win.commit_list)
+    assert (first.signature, first.signer, first.signing_key) == ('G', 'Signer', 'KEY')
+    assert second.github_verification == {'verified': True}
+
+    win.request_signatures = MagicMock()
+    win.verify_with_github = MagicMock()
+    win.start_signature_verification()
+    win.update_signatures.assert_not_called()
+    assert list(win._signature_queue) == [c.oid for c in win.commit_list[1:]]
+    win.request_signatures.assert_called_once()
+
+
+def test_signature_batches_take_visible_commits_first_and_leave_the_queue(
+    app_context, monkeypatch
+):
+    win = _signature_dag(app_context, monkeypatch, count=200)
+    win._signature_queue = dict.fromkeys(c.oid for c in win.commit_list)
+    visible = [c.oid for c in win.commit_list[150:155]]
+    win.treewidget.visible_oids.return_value = visible
+    started = []
+    win.context = MagicMock()
+    win.context.runtask.start.side_effect = lambda task, result: started.append(task)
+
+    win.request_signatures()
+    (task,) = started
+    assert task.args[1] == visible
+
+    win.verify_with_github = MagicMock()
+    win.signatures_ready((visible, {visible[0]: ('G', 'S', 'K')}))
+    assert not any(oid in win._signature_queue for oid in visible)
+    assert len(win._signature_queue) == 195
+    assert win.commits[visible[0]].signature == 'G'
+    win.update_signatures.assert_called_once_with(visible)
+
+    # Nothing on screen left: the batch comes from the front of the queue.
+    win.treewidget.visible_oids.return_value = []
+    started.clear()
+    win.request_signatures()
+    assert started[0].args[1] == [c.oid for c in win.commit_list[:64]]
+
+
+def test_github_verification_does_not_re_render_cached_verdicts(
+    app_context, monkeypatch
+):
+    win = _signature_dag(app_context, monkeypatch)
+    for commit in win.commit_list:
+        commit.signature = 'G'
+    win._github_verified[win.commit_list[0].oid] = {'verified': True}
+    monkeypatch.setattr(dag_widgets.github, 'repository', lambda _ctx: ('o', 'r'))
+    started = []
+    win.context = MagicMock()
+    win.context.runtask.start.side_effect = lambda task, result: started.append(task)
+
+    win.verify_with_github()
+    win.update_signatures.assert_not_called()
+    (task,) = started
+    assert task.args[3] == [c.oid for c in win.commit_list[1:]]
+
+
+def test_signature_cells_of_a_hidden_column_are_not_rendered(qapp, app_context):
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(3)]
+    tree.add_commits(commits)
+    idx = tree.column_index('signature')
+    render = MagicMock()
+    tree.columns[idx].render = render
+    tree.setColumnHidden(idx, True)
+    tree.update_signatures([commits[0].oid])
+    render.assert_not_called()
+    tree.setColumnHidden(idx, False)
+    tree.update_signatures([commits[0].oid])
+    render.assert_called_once()
+
+
 def test_set_labels_replaces_tags_and_branches(app_context):
     commit = _commit_for_columns(app_context)
     commit.set_labels(' (HEAD -> refs/heads/main, tag: refs/tags/v1, refs/remotes/o/x)')
