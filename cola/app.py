@@ -74,6 +74,7 @@ from .cmd import CommandBus
 from .i18n import N_
 from .interaction import Interaction
 from .models import main
+from .models import prefs
 from .models import selection
 from .settings import Session
 from .settings import Settings
@@ -321,6 +322,10 @@ class ColaApplication:
 
         self.context = context
         self.theme: themes.Theme | None = None
+        # Whether _install_style() replaced the palette or the macOS
+        # appearance, which a later theme has to undo.
+        self._palette_set = False
+        self._appearance_set = False
         self._install_hidpi_config()
         self._app = ColaQApplication(context, list(argv))
         if core.IS_DARWIN:
@@ -333,29 +338,61 @@ class ColaApplication:
         self._app.setWindowIcon(icons.cola())
         self._app.setDesktopFileName('git-cola')
         self._install_style(gui_theme)
+        # Preferences writes the config as each setting changes, so the theme
+        # follows it without a restart.
+        context.cfg.user_config_changed.connect(self._config_changed)
+        context.cfg.repo_config_changed.connect(self._config_changed)
+
+    def _config_changed(self, key, _value) -> None:
+        """Re-theme the running app when the theme settings change"""
+        if key in (prefs.THEME, prefs.BOLD_FONTS):
+            # get() answers from a cache that set_user()/set_repo() leave
+            # stale. update() re-reads the config files once they've changed.
+            self.context.cfg.update()
+            self._install_style(None)
 
     def _install_style(self, theme_str: str | None) -> None:
         """Generate and apply a stylesheet to the app"""
         if theme_str is None:
-            theme_str = self.context.cfg.get('cola.theme', default='default')
+            theme_str = self.context.cfg.get(prefs.THEME, default='default')
         theme = themes.find_theme(theme_str)
         self.theme = theme
 
-        bold_fonts = self.context.cfg.get('cola.boldfonts', default=False)
+        is_macos_theme = theme_str.startswith('macos-')
+        sets_palette = not is_macos_theme and theme_str != 'default'
+        sets_appearance = is_macos_theme or (
+            sets_palette and theme.style_sheet == themes.EStylesheet.FLAT
+        )
+        # Undo what a previous theme changed, so the system palette and
+        # appearance show through again. An appearance the new theme sets
+        # anyway is left alone: switching it off and on would announce two
+        # palette changes, and each one re-themes the app.
+        if self._palette_set:
+            self._app.setPalette(QtGui.QPalette())
+            self._palette_set = False
+        if self._appearance_set and not sets_appearance:
+            themes.reset_platform_appearance()
+        self._appearance_set = sets_appearance
+
+        bold_fonts = self.context.cfg.get(prefs.BOLD_FONTS, default=False)
         theme_stylesheet = theme.build_style_sheet(self._app.palette(), bold_fonts)
         self._app.setStyleSheet(theme_stylesheet)
 
-        is_macos_theme = theme_str.startswith('macos-')
         if is_macos_theme:
             themes.apply_platform_theme(theme_str)
-        elif theme_str != 'default':
+        elif sets_palette:
             self._app.setPalette(theme.build_palette(self._app.palette()))
+            self._palette_set = True
             themes.apply_window_appearance(theme)
 
     def refresh_system_appearance(self) -> None:
-        """Rebuild styles that follow the system palette."""
-        theme_str = self.context.cfg.get('cola.theme', default='default')
-        if theme_str != 'default':
+        """Rebuild styles that follow the system palette.
+
+        The macOS themes count too: their palette arrives after the appearance
+        they set, so the style sheet built alongside it saw the old palette.
+        """
+        theme_str = self.context.cfg.get(prefs.THEME, default='default')
+        if theme_str != 'default' and not theme_str.startswith('macos-'):
             return
 
         self._install_style(None)

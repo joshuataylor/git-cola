@@ -97,3 +97,14 @@ def test_default_themes_say_they_follow_the_system():
     assert titles['default'] == 'Default (follows system)'
     icon_titles = dict((name, title) for title, name in icons.icon_themes())
     assert icon_titles['default'] == 'Default (follows system)'
+
+
+def test_reset_platform_appearance_follows_the_system(monkeypatch):
+    fake = _FakeAppKit()
+    monkeypatch.setattr(themes, 'AppKit', fake)
+    monkeypatch.setattr(themes.core, 'IS_DARWIN', True)
+    themes.reset_platform_appearance()
+    assert fake.applied == [None]
+    monkeypatch.setattr(themes.core, 'IS_DARWIN', False)
+    themes.reset_platform_appearance()
+    assert fake.applied == [None]

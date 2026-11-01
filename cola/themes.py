@@ -784,6 +784,14 @@ def apply_platform_theme(theme_name: str) -> None:
         app.setAppearance_(appearance)
 
 
+def reset_platform_appearance() -> None:
+    """Let the macOS appearance follow the system again"""
+    if not core.IS_DARWIN or AppKit is None:
+        return
+    app = AppKit.NSApplication.sharedApplication()
+    app.setAppearance_(None)
+
+
 def apply_window_appearance(theme: Theme) -> None:
     """Match the macOS window chrome to a flat light or dark theme
 
