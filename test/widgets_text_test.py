@@ -431,3 +431,46 @@ def test_log_appends_every_line_with_its_timestamp(qapp, monkeypatch):
         f'{prefix}first\n{prefix}second\n{prefix}third\n'
     )
     assert len(inserts) == 1
+
+
+DIFF_PATH = 'scripts/report_data/filter_request_user_plugin_output_render_task.svg'
+
+
+@pytest.fixture
+def diff_filename(qapp, monkeypatch):
+    """The diff view's filename label, elided, with the clipboard captured"""
+    from cola.widgets import diff
+
+    copied = []
+    monkeypatch.setattr(text.qtutils, 'set_clipboard', copied.append)
+    parent = QtWidgets.QWidget()
+    label = diff.filename_label(parent)
+    label.set_text(DIFF_PATH)
+    parent.resize(160, 30)
+    label.resize(160, 30)
+    parent.show()
+    QTest.qWaitForWindowExposed(parent)
+    try:
+        yield label, copied
+    finally:
+        parent.close()
+
+
+def test_diff_filename_click_copies_the_full_path(diff_filename):
+    """A plain click copies the whole path, not the elided display"""
+    label, copied = diff_filename
+    assert label.text() != DIFF_PATH  # elided
+    _click(label, label.contentsRect().center())
+    assert copied == [DIFF_PATH]
+
+
+def test_diff_filename_drag_selects_without_copying(diff_filename):
+    label, copied = diff_filename
+    rect = label.contentsRect()
+    start = QPoint(rect.left() + 4, rect.center().y())
+    end = QPoint(rect.left() + 60, rect.center().y())
+    _send(label, PRESS, start)
+    _send(label, MOVE, end)
+    _send(label, RELEASE, end)
+    assert copied == []
+    assert label.selectedText()
