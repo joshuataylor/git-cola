@@ -27,44 +27,51 @@ def _parse_timestamp(value: str) -> int:
 
 
 class CommitFactory:
-    root_generation = 0
-    commits = None
-    # One copy of each author/committer name and email, which repeat across
-    # thousands of commits. Cleared with the commits, unlike sys.intern().
-    strings: dict[str, str] = {}
+    """Make the Commit objects of one read, sharing parents and strings
 
-    @classmethod
-    def reset(cls) -> None:
-        if isinstance(cls.commits, dict):
-            cls.commits.clear()
-        cls.strings.clear()
-        cls.root_generation = 0
+    Each RepoReader has its own. A single class-level factory was reset by
+    every reader, so the commit message menu or the sequence editor reading
+    a few commits could clear it under the DAG's reader thread mid-parse,
+    and it kept every commit of the last read alive after its window closed.
+    """
 
-    @classmethod
-    def share(cls, value: str) -> str:
+    def __init__(self) -> None:
+        self.root_generation = 0
+        self.commits: dict[str | None, Commit] = {}
+        # One copy of each author/committer name and email, which repeat across
+        # thousands of commits. Cleared with the commits, unlike sys.intern().
+        self.strings: dict[str, str] = {}
+
+    def reset(self) -> None:
+        self.commits.clear()
+        self.strings.clear()
+        self.root_generation = 0
+
+    def share(self, value: str) -> str:
         """Return the shared copy of a string that repeats across commits"""
-        return cls.strings.setdefault(value, value)
+        return self.strings.setdefault(value, value)
 
-    @classmethod
     def new(
-        cls, context, oid: str | None = None, log_entry: str | None = None
+        self, context, oid: str | None = None, log_entry: str | None = None
     ) -> Commit:
-        if cls.commits is None:
-            cls.commits = {}
         if not oid and log_entry:
             oid = log_entry[: context.model.oid_len]
         try:
-            commit = cls.commits[oid]
+            commit = self.commits[oid]
             if log_entry and not commit.parsed:
-                commit.parse(log_entry)
-            cls.root_generation = max(commit.generation, cls.root_generation)
+                commit.parse(log_entry, factory=self)
+            self.root_generation = max(commit.generation, self.root_generation)
         except KeyError:
-            commit = Commit(context, oid=oid, log_entry=log_entry)
+            commit = Commit(context, oid=oid, log_entry=log_entry, factory=self)
             if not log_entry:
-                cls.root_generation += 1
-                commit.generation = max(commit.generation, cls.root_generation)
-            cls.commits[oid] = commit
+                self.root_generation += 1
+                commit.generation = max(commit.generation, self.root_generation)
+            self.commits[oid] = commit
         return commit
+
+
+# For Commit objects made outside a RepoReader, e.g. in tests.
+_default_factory = CommitFactory()
 
 
 class DAG:
@@ -138,8 +145,14 @@ class Commit:
     )
 
     def __init__(
-        self, context, oid: str | None = None, log_entry: str | None = None
+        self,
+        context,
+        oid: str | None = None,
+        log_entry: str | None = None,
+        factory: CommitFactory | None = None,
     ) -> None:
+        if factory is None:
+            factory = _default_factory
         self.context = context
         self.oid = oid
         self.summary: str | None = None
@@ -159,13 +172,17 @@ class Commit:
         self.commitdate: str | None = None
         self.committer_timestamp: int = 0
         self.parsed = False
-        self.generation = CommitFactory.root_generation
+        self.generation = factory.root_generation
         self.column = None
         self.row = None
         if log_entry:
-            self.parse(log_entry)
+            self.parse(log_entry, factory=factory)
 
-    def parse(self, log_entry: str, sep: str = LOGSEP):
+    def parse(
+        self, log_entry: str, sep: str = LOGSEP, factory: CommitFactory | None = None
+    ):
+        if factory is None:
+            factory = _default_factory
         oid_len = self.context.model.oid_len
         self.oid = log_entry[:oid_len]
         after_oid = log_entry[oid_len + 1 :]
@@ -184,7 +201,7 @@ class Commit:
             summary,
         ) = details
 
-        share = CommitFactory.share
+        share = factory.share
         self.summary = summary if summary else ''
         self.author = share(author)
         self.authdate = authdate if authdate else ''
@@ -198,7 +215,7 @@ class Commit:
         if parents:
             generation = None
             for parent_oid in parents.split(' '):
-                parent = CommitFactory.new(self.context, oid=parent_oid)
+                parent = factory.new(self.context, oid=parent_oid)
                 parent.children.append(self)
                 if generation is None:
                     generation = parent.generation + 1
@@ -327,6 +344,7 @@ class RepoReader:
         # for the synchronous callers.
         self._should_interrupt = should_interrupt or (lambda: False)
         self._objects: dict[str, Commit] = {}
+        self._factory = CommitFactory()
         self._cmd = [
             'git',
             '-c',
@@ -350,7 +368,7 @@ class RepoReader:
         return len(self._topo_list)
 
     def reset(self) -> None:
-        CommitFactory.reset()
+        self._factory.reset()
         self._cached = False
         self._topo_list = []
 
@@ -387,7 +405,7 @@ class RepoReader:
                     commit = self._objects[oid]
                 except KeyError:
                     try:
-                        commit = CommitFactory.new(self.context, log_entry=log_entry)
+                        commit = self._factory.new(self.context, log_entry=log_entry)
                     except (KeyError, ValueError):
                         continue
                     self._objects[commit.oid] = commit
