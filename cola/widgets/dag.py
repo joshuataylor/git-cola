@@ -1947,20 +1947,40 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         QtWidgets.QTreeWidget.leaveEvent(self, event)
 
 
+# How long typing must pause before the find bar asks git about full messages
+# and changed files, and the shortest text worth asking about.
+FIND_GIT_DELAY_MS = 250
+FIND_GIT_MIN_CHARS = 2
+
+
+def commit_haystack(commit):
+    """The in-memory text that find searches: summary, people and refs
+
+    Fields are joined with NUL, which a needle never contains, so a match
+    can't span two fields.
+    """
+    fields = [
+        commit.summary,
+        commit.author,
+        commit.email,
+        commit.committer,
+        commit.committer_email,
+    ]
+    fields.extend(commit.tags)
+    return '\0'.join(field for field in fields if field)
+
+
 def commit_matches(commit, needle, case_sensitive=False):
-    """Does the commit's summary, author, email, refs or oid prefix match?"""
+    """Does the summary, author, committer, email, a ref or an oid prefix match?"""
     if not needle:
         return False
-    fields = [commit.summary, commit.author, commit.email]
-    fields.extend(commit.tags)
+    haystack = commit_haystack(commit)
     oid = commit.oid or ''
     if not case_sensitive:
         needle = needle.lower()
-        fields = [field.lower() for field in fields if field]
+        haystack = haystack.lower()
         oid = oid.lower()
-    if oid.startswith(needle):
-        return True
-    return any(needle in field for field in fields if field)
+    return oid.startswith(needle) or needle in haystack
 
 
 def find_matches(commits, needle, case_sensitive=False):
@@ -1970,6 +1990,36 @@ def find_matches(commits, needle, case_sensitive=False):
         for idx, commit in enumerate(commits)
         if commit_matches(commit, needle, case_sensitive)
     ]
+
+
+def file_pathspec(needle, case_sensitive=False):
+    """A pathspec matching any path that contains needle"""
+    escaped = ''.join('\\' + char if char in '\\*?[]' else char for char in needle)
+    magic = 'glob' if case_sensitive else 'icase,glob'
+    return f':({magic})**/*{escaped}*'
+
+
+def find_commits_with_git(context, oids, needle, kind, case_sensitive=False):
+    """Return the oids, from oids, whose full message or changed paths match
+
+    kind is 'message' or 'files'. Only the given commits are read (--stdin
+    with --no-walk), so the cost follows the length of the list, not the
+    history: about 20 ms for 1000 commits by message, 300 ms by file.
+    """
+    if not oids or not needle:
+        return set()
+    args = ['--no-walk=unsorted', '--stdin', '--format=%H']
+    if kind == 'message':
+        args += ['--fixed-strings', '--grep=' + needle]
+        if not case_sensitive:
+            args.append('--regexp-ignore-case')
+    else:
+        args += ['--', file_pathspec(needle, case_sensitive)]
+    stdin = ('\n'.join(oids) + '\n').encode('utf-8')
+    status, out, _ = context.git.log(*args, _input=stdin, _readonly=True)
+    if status != 0:
+        return set()
+    return set(out.split())
 
 
 def next_match(matches, row, backwards=False, inclusive=False):
@@ -1997,7 +2047,13 @@ def next_match(matches, row, backwards=False, inclusive=False):
 
 
 class CommitFindWidget(QtWidgets.QWidget):
-    """The find bar that jumps between matching commits in the commit list"""
+    """The find bar that jumps between matching commits in the commit list
+
+    Summaries, authors, committers, emails, refs and oid prefixes are matched
+    in memory as you type. Full messages and changed file paths are not in
+    memory, so once typing pauses git searches the listed commits for them in
+    the background, and its matches join the others as they arrive.
+    """
 
     def __init__(self, tree, parent):
         super().__init__(parent)
@@ -2005,12 +2061,34 @@ class CommitFindWidget(QtWidgets.QWidget):
         self._tree = tree
         self._matches = None
         """Cached row indices of matching commits, None when stale"""
+        self._haystacks = None
+        """commit_haystack() per commit in tree.commits order, None when stale"""
+        self._lower_haystacks = None
+        self._text_search = None
+        """(needle, case_sensitive, indices into tree.commits) of the last scan"""
+        self._git_oids = set()
+        """Oids git matched for the current criteria"""
+        self._git_pending = 0
+        self._generation = 0
+        """Bumped whenever the criteria or the commits change, to drop stale results"""
+        self._origin_row = -1
+        """The current row when the text last changed, where matches are counted from"""
+        self._jumped_oid = None
+        """The commit find-as-you-type selected, None once the user moves away"""
         self._return_focus = None
         """The widget that had focus before the find bar, refocused on Esc"""
+        self._runtask = qtutils.RunTask(parent=self)
+        self._git_timer = QtCore.QTimer(self)
+        self._git_timer.setSingleShot(True)
+        self._git_timer.setInterval(FIND_GIT_DELAY_MS)
+        self._git_timer.timeout.connect(self._start_git_search)
 
         self.text = HintedDefaultLineEdit(N_('Find commits'), parent=self)
         self.text.setToolTip(
-            N_('Find commits by summary, author, email, ref or commit ID')
+            N_(
+                'Find commits by summary, message, author, committer, email, '
+                'ref, commit ID or changed file'
+            )
         )
         self.prev_button = qtutils.create_action_button(
             tooltip=N_('Find the previous matching commit'), icon=icons.up()
@@ -2019,6 +2097,16 @@ class CommitFindWidget(QtWidgets.QWidget):
             tooltip=N_('Find the next matching commit'), icon=icons.down()
         )
         self.match_case_checkbox = qtutils.checkbox(N_('Match Case'))
+        self.messages_checkbox = qtutils.checkbox(
+            N_('Messages'),
+            tooltip=N_('Also search the full commit messages'),
+            checked=True,
+        )
+        self.files_checkbox = qtutils.checkbox(
+            N_('Files'),
+            tooltip=N_('Also search the paths of the files each commit changed'),
+            checked=True,
+        )
         self.count_label = QtWidgets.QLabel(self)
         self.close_button = qtutils.create_action_button(
             tooltip=N_('Close the find bar'), icon=icons.close()
@@ -2031,6 +2119,8 @@ class CommitFindWidget(QtWidgets.QWidget):
             self.prev_button,
             self.next_button,
             self.match_case_checkbox,
+            self.messages_checkbox,
+            self.files_checkbox,
             self.count_label,
             qtutils.STRETCH,
             self.close_button,
@@ -2046,9 +2136,12 @@ class CommitFindWidget(QtWidgets.QWidget):
         qtutils.connect_button(self.next_button, self.search)
         qtutils.connect_button(self.prev_button, self.search_backwards)
         qtutils.connect_button(self.close_button, self.hide_find)
-        qtutils.connect_checkbox(
-            self.match_case_checkbox, lambda _: self._criteria_changed()
-        )
+        for checkbox in (
+            self.match_case_checkbox,
+            self.messages_checkbox,
+            self.files_checkbox,
+        ):
+            qtutils.connect_checkbox(checkbox, lambda _: self._criteria_changed())
 
     def show_find(self):
         """Show the find bar and focus it, selecting any previous text"""
@@ -2058,9 +2151,14 @@ class CommitFindWidget(QtWidgets.QWidget):
         self.show()
         self.text.setFocus()
         self.text.selectAll()
+        # hide_find() dropped git's matches: search again for the kept text.
+        if self.text.get():
+            self._matches = None
+            self._schedule_git_search()
 
     def hide_find(self):
         """Hide the find bar and return focus to where it was opened from"""
+        self._cancel_git_search()
         self.hide()
         widget = self._return_focus
         self._return_focus = None
@@ -2069,8 +2167,14 @@ class CommitFindWidget(QtWidgets.QWidget):
         widget.setFocus()
 
     def invalidate(self):
-        """Forget the cached matches so the next search rescans the list"""
+        """Forget the matches when the commits change, so the next search rescans"""
         self._matches = None
+        self._haystacks = None
+        self._lower_haystacks = None
+        self._text_search = None
+        # Commits arrive in chunks while the list loads: search the new ones too.
+        if self.isVisible() and self.text.get():
+            self._schedule_git_search()
 
     def search(self):
         """Select the next matching commit"""
@@ -2082,19 +2186,136 @@ class CommitFindWidget(QtWidgets.QWidget):
 
     def _criteria_changed(self, *_args):
         """Find as you type, staying on the current commit while it matches"""
-        self.invalidate()
-        self._jump(backwards=False, inclusive=True)
+        self._matches = None
+        self._schedule_git_search()
+        current = self._tree.currentItem()
+        if current is None or current.commit.oid != self._jumped_oid:
+            self._origin_row = self._current_row()
+        self._jump(backwards=False, inclusive=True, row=self._origin_row)
+        current = self._tree.currentItem()
+        self._jumped_oid = current.commit.oid if current is not None else None
+
+    def _git_kinds(self):
+        """The git searches the current criteria need"""
+        if len(self.text.get()) < FIND_GIT_MIN_CHARS:
+            return []
+        kinds = []
+        if self.messages_checkbox.isChecked():
+            kinds.append('message')
+        if self.files_checkbox.isChecked():
+            kinds.append('files')
+        return kinds
+
+    def _cancel_git_search(self):
+        """Drop the git matches and any search still running"""
+        self._generation += 1
+        self._git_timer.stop()
+        self._git_oids = set()
+        self._git_pending = 0
+
+    def _schedule_git_search(self):
+        """Search with git once typing pauses"""
+        self._cancel_git_search()
+        if self._git_kinds():
+            self._git_pending = len(self._git_kinds())
+            self._git_timer.start()
+
+    def _start_git_search(self):
+        """Ask git which listed commits match by full message or changed files"""
+        kinds = self._git_kinds()
+        self._git_pending = len(kinds)
+        if not kinds:
+            return
+        oids = [
+            commit.oid
+            for commit in self._tree.commits
+            if commit.oid and commit.oid not in (dag.STAGE, dag.WORKTREE)
+        ]
+        needle = self.text.get()
+        case_sensitive = self.match_case_checkbox.isChecked()
+        generation = self._generation
+        context = self._tree.context
+        for kind in kinds:
+            task = qtutils.SimpleTask(
+                find_commits_with_git, context, oids, needle, kind, case_sensitive
+            )
+            self._runtask.start(
+                task,
+                result=lambda found: self._apply_git_matches(generation, found),
+            )
+
+    def _apply_git_matches(self, generation, found):
+        """Add git's matches, and jump to one if the selection isn't a match"""
+        if generation != self._generation:
+            return
+        self._git_pending = max(0, self._git_pending - 1)
+        new = found - self._git_oids
+        if not new:
+            self._update_count(self._matching_rows())
+            return
+        self._git_oids |= new
+        self._matches = None
+        matches = self._matching_rows()
+        current = self._tree.currentItem()
+        untouched = current is not None and current.commit.oid == self._jumped_oid
+        if untouched or self._current_row() not in matches:
+            # Git's matches can land before the one find-as-you-type picked, so
+            # pick again from where the search started, unless the user moved.
+            self._jump(backwards=False, inclusive=True, row=self._origin_row)
+            current = self._tree.currentItem()
+            self._jumped_oid = current.commit.oid if current is not None else None
+        else:
+            self._update_count(matches)
+
+    def _text_indices(self, needle, case_sensitive):
+        """Indices into tree.commits of the in-memory matches"""
+        commits = self._tree.commits
+        if self._haystacks is None:
+            self._haystacks = [commit_haystack(commit) for commit in commits]
+            self._lower_haystacks = None
+        if case_sensitive:
+            haystacks = self._haystacks
+        else:
+            if self._lower_haystacks is None:
+                self._lower_haystacks = [hay.lower() for hay in self._haystacks]
+            haystacks = self._lower_haystacks
+            needle = needle.lower()
+        # Typing extends the text, so only the previous matches can still match.
+        candidates = range(len(commits))
+        previous = self._text_search
+        if (
+            previous is not None
+            and previous[1] == case_sensitive
+            and needle.startswith(previous[0])
+        ):
+            candidates = previous[2]
+        indices = []
+        for idx in candidates:
+            oid = commits[idx].oid or ''
+            if not case_sensitive:
+                oid = oid.lower()
+            if oid.startswith(needle) or needle in haystacks[idx]:
+                indices.append(idx)
+        self._text_search = (needle, case_sensitive, indices)
+        return indices
 
     def _matching_rows(self):
         """Return the matching row indices, rescanning the list when stale"""
         if self._matches is None:
+            needle = self.text.get()
+            if not needle:
+                self._matches = []
+                return self._matches
             tree = self._tree
-            commits = (
-                tree.topLevelItem(row).commit for row in range(tree.topLevelItemCount())
-            )
-            self._matches = find_matches(
-                commits, self.text.get(), self.match_case_checkbox.isChecked()
-            )
+            # Rows are tree.commits in reverse order.
+            last = len(tree.commits) - 1
+            case_sensitive = self.match_case_checkbox.isChecked()
+            rows = {last - idx for idx in self._text_indices(needle, case_sensitive)}
+            for oid in self._git_oids:
+                item = tree.oidmap.get(oid)
+                if item is not None:
+                    rows.add(last - item.position)
+            self._matches = sorted(rows)
         return self._matches
 
     def _current_row(self):
@@ -2102,19 +2323,32 @@ class CommitFindWidget(QtWidgets.QWidget):
         item = self._tree.currentItem()
         if item is None:
             return -1
-        return self._tree.indexOfTopLevelItem(item)
+        return len(self._tree.commits) - 1 - item.position
 
-    def _jump(self, backwards, inclusive):
+    def _update_count(self, matches, row=None):
+        """Show "position/total", and that git is still searching"""
+        if row is None:
+            row = self._current_row()
+        text = ''
+        if matches and row in matches:
+            position = bisect.bisect_left(matches, row) + 1
+            text = f'{position}/{len(matches)}'
+        elif matches:
+            text = str(len(matches))
+        if self._git_pending:
+            text = (text + ' ' + N_('searching...')).strip()
+        self.count_label.setText(text)
+
+    def _jump(self, backwards, inclusive, row=None):
         """Select the next or previous match and update the match count"""
         matches = self._matching_rows()
-        row = next_match(matches, self._current_row(), backwards, inclusive)
         if row is None:
-            self.count_label.setText('')
-            return
-        item = self._tree.topLevelItem(row)
-        self._tree.select([item.commit.oid])
-        position = bisect.bisect_left(matches, row) + 1
-        self.count_label.setText(f'{position}/{len(matches)}')
+            row = self._current_row()
+        row = next_match(matches, row, backwards, inclusive)
+        if row is not None:
+            item = self._tree.topLevelItem(row)
+            self._tree.select([item.commit.oid])
+        self._update_count(matches, row)
 
 
 class GitDAG(standard.MainWindow):

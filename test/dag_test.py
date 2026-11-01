@@ -1,4 +1,5 @@
 """Tests DAG functionality"""
+import os
 import sys
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -6,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from cola.models import dag
+from cola.widgets import dag as dag_widgets
 from cola.widgets.dag import COMMIT_ROLE
 from cola.widgets.dag import GRAPH_PREV_ROW_ROLE
 from cola.widgets.dag import GRAPH_ROW_ROLE
@@ -17,6 +19,8 @@ from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
 from cola.widgets.dag import _prepare_labels_cached
 from cola.widgets.dag import commit_matches
+from cola.widgets.dag import file_pathspec
+from cola.widgets.dag import find_commits_with_git
 from cola.widgets.dag import find_matches
 from cola.widgets.dag import next_match
 from cola.widgets.dag import row_runs
@@ -28,6 +32,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from . import helper
 from .helper import app_context
 from .helper import commit_files
 
@@ -974,9 +979,13 @@ def test_commit_matches_fields(app_context):
     assert commit_matches(commit, 'AD454B')
     # The oid only matches as a prefix, so short hex strings stay meaningful.
     assert not commit_matches(commit, '5785af')
-    # The committer is not a find field.
-    assert not commit_matches(commit, 'Josh Taylor')
+    # The committer is a find field too.
+    assert commit_matches(commit, 'josh taylor')
+    assert commit_matches(commit, 'joshuataylorx@')
+    assert not commit_matches(commit, 'no such person')
     assert not commit_matches(commit, '')
+    # Fields are searched separately, so a match can't span two of them.
+    assert not commit_matches(commit, 'aguilardavvid')
 
 
 def test_commit_matches_case_sensitive(app_context):
@@ -1011,8 +1020,12 @@ def test_next_match_steps_and_wraps():
     assert next_match([], 0) is None
 
 
-def _find_tree(app_context):
-    """Build a commit list whose rows 1, 3 and 4 match "fix" """
+def _find_tree(app_context, git=False):
+    """Build a commit list whose rows 1, 3 and 4 match "fix"
+
+    The git searches (full messages, changed files) are off unless git=True,
+    so the in-memory matching can be checked on its own.
+    """
     tree = CommitTreeWidget(app_context, None)
     commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(6)]
     tree.add_commits(commits)
@@ -1021,7 +1034,64 @@ def _find_tree(app_context):
         items[row].commit.summary = f'fix number {row}'
     tree.commits_changed.emit()
     find = CommitFindWidget(tree, None)
+    find.messages_checkbox.setChecked(git)
+    find.files_checkbox.setChecked(git)
     return tree, find, items
+
+
+class _SyncRunTask:
+    """Run a find bar task at once, so no thread outlives the test"""
+
+    def start(self, task, result=None, **_kwargs):
+        result(task.task())
+
+
+def _git_find_tree(app_context, monkeypatch, found):
+    """A find bar whose git searches return found[kind] for the needle"""
+    tree, find, items = _find_tree(app_context, git=True)
+    calls = []
+
+    def fake_git(context, oids, needle, kind, case_sensitive=False):
+        calls.append((needle, kind, case_sensitive, len(oids)))
+        return set(found.get(kind, {}).get(needle, ()))
+
+    monkeypatch.setattr(dag_widgets, 'find_commits_with_git', fake_git)
+    find._runtask = _SyncRunTask()
+    return tree, find, items, calls
+
+
+def test_file_pathspec_matches_a_substring_of_any_path():
+    assert file_pathspec('cargo') == ':(icase,glob)**/*cargo*'
+    assert file_pathspec('Cargo', case_sensitive=True) == ':(glob)**/*Cargo*'
+    # Glob characters in the text are matched literally.
+    assert file_pathspec('a*b?[c]\\') == ':(icase,glob)**/*a\\*b\\?\\[c\\]\\\\*'
+
+
+def test_find_commits_with_git_searches_messages_and_files(app_context):
+    """git reads only the given commits, by full message or changed path"""
+    os.makedirs('docs')
+    os.makedirs('src')
+    helper.write_file('docs/Guide.txt', 'one\n')
+    helper.run_git('add', 'docs/Guide.txt')
+    helper.run_git('commit', '-q', '-m', 'add docs\n\nThe body mentions Widgets.')
+    guide = helper.run_git('rev-parse', 'HEAD').strip()
+    helper.write_file('src/main.c', 'two\n')
+    helper.run_git('add', 'src/main.c')
+    helper.run_git('commit', '-q', '-m', 'add code')
+    code = helper.run_git('rev-parse', 'HEAD').strip()
+    oids = [guide, code]
+
+    search = find_commits_with_git
+    assert search(app_context, oids, 'widgets', 'message') == {guide}
+    assert search(app_context, oids, 'widgets', 'message', True) == set()
+    assert search(app_context, oids, 'Widgets', 'message', True) == {guide}
+    assert search(app_context, oids, 'guide', 'files') == {guide}
+    assert search(app_context, oids, 'guide', 'files', True) == set()
+    assert search(app_context, oids, 'main.c', 'files') == {code}
+    assert search(app_context, oids, 'src/m', 'files') == {code}
+    # Only the commits passed in are searched.
+    assert search(app_context, [code], 'widgets', 'message') == set()
+    assert search(app_context, [], 'widgets', 'message') == set()
 
 
 def test_commit_find_selects_as_you_type(qapp, app_context):
@@ -1073,6 +1143,114 @@ def test_commit_find_rescans_added_commits(qapp, app_context):
     find.search()
     assert tree.selectedItems()[0].commit is newer
     assert find.count_label.text() == '1/4'
+
+
+def test_commit_find_adds_git_matches_after_typing_pauses(
+    qapp, app_context, monkeypatch
+):
+    """Full-message and changed-file matches join the in-memory ones"""
+    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, {})
+    by_message = items[2].commit.oid
+    by_file = items[5].commit.oid
+    found = {'message': {'fix': {by_message}}, 'files': {'fix': {by_file}}}
+    monkeypatch.setattr(
+        dag_widgets,
+        'find_commits_with_git',
+        lambda context, oids, needle, kind, case_sensitive=False: (
+            calls.append((needle, kind)) or set(found[kind].get(needle, ()))
+        ),
+    )
+
+    find.text.setText('fix')
+    # The summaries match at once, and git runs once typing pauses.
+    assert tree.selectedItems() == [items[1]]
+    assert find.count_label.text() == '1/3 searching...'
+    assert calls == []
+    assert find._git_timer.isActive()
+
+    find._git_timer.timeout.emit()
+    assert sorted(kind for _needle, kind in calls) == ['files', 'message']
+    assert find.count_label.text() == '1/5'
+    # The selection stays on the in-memory match, and Next reaches git's.
+    find.search()
+    assert tree.selectedItems() == [items[2]]
+    find.search()
+    find.search()
+    find.search()
+    assert tree.selectedItems() == [items[5]]
+    assert find.count_label.text() == '5/5'
+
+
+def test_commit_find_jumps_to_a_git_match_when_nothing_else_matches(
+    qapp, app_context, monkeypatch
+):
+    found = {'message': {'body text': set()}, 'files': {'body text': set()}}
+    tree, find, items, _calls = _git_find_tree(app_context, monkeypatch, found)
+    found['message']['body text'] = {items[4].commit.oid}
+    tree.select([items[0].commit.oid])
+
+    find.text.setText('body text')
+    assert tree.selectedItems() == [items[0]]
+    assert find.count_label.text() == 'searching...'
+    find._git_timer.timeout.emit()
+    assert tree.selectedItems() == [items[4]]
+    assert find.count_label.text() == '1/1'
+
+
+def test_commit_find_moves_to_an_earlier_git_match_unless_the_user_moved(
+    qapp, app_context, monkeypatch
+):
+    """A git match above the one find-as-you-type picked takes over"""
+    found = {'message': {'fix': set()}, 'files': {'fix': set()}}
+    tree, find, items, _calls = _git_find_tree(app_context, monkeypatch, found)
+    found['files']['fix'] = {items[0].commit.oid}
+    tree.setCurrentItem(None)
+
+    find.text.setText('fix')
+    assert tree.selectedItems() == [items[1]]
+    find._git_timer.timeout.emit()
+    assert tree.selectedItems() == [items[0]]
+    assert find.count_label.text() == '1/4'
+
+    # Once the user has moved to another match, a late batch leaves it alone.
+    find.search()
+    find.search()
+    assert tree.selectedItems() == [items[3]]
+    find._apply_git_matches(find._generation, {items[2].commit.oid})
+    assert tree.selectedItems() == [items[3]]
+    assert find.count_label.text() == '4/5'
+
+
+def test_commit_find_drops_git_results_for_old_text(qapp, app_context, monkeypatch):
+    """A result that arrives after the text changed is ignored"""
+    tree, find, items, _calls = _git_find_tree(app_context, monkeypatch, {})
+    find.text.setText('first')
+    stale = find._generation
+    find.text.setText('second')
+    find._apply_git_matches(stale, {items[2].commit.oid})
+    assert find._git_oids == set()
+    assert items[2] not in tree.selectedItems()
+
+
+def test_commit_find_skips_git_for_short_text_and_unchecked_boxes(
+    qapp, app_context, monkeypatch
+):
+    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, {})
+    # "x" only appears in the "fix number" summaries.
+    find.text.setText('x')
+    assert not find._git_timer.isActive()
+    assert find.count_label.text() == '1/3'
+
+    find.text.setText('fix')
+    find.files_checkbox.click()
+    qapp.processEvents()  # checkbox clicks are queued
+    find._git_timer.timeout.emit()
+    assert [kind for _needle, kind, _case, _count in calls] == ['message']
+
+    find.messages_checkbox.click()
+    qapp.processEvents()  # checkbox clicks are queued
+    assert not find._git_timer.isActive()
+    assert find.count_label.text() == '1/3'
 
 
 def test_commit_find_escape_hides(qapp, app_context):
