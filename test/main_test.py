@@ -15,6 +15,8 @@ from cola.models import main as main_model
 from cola.models import prefs
 from cola.settings import Settings
 from cola.widgets import main as main_widget
+from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from . import helper
@@ -40,6 +42,15 @@ def main_view(qapp, tmp_path, monkeypatch):
     pieces the window actually reads -- git, cfg, model and settings -- are
     real so construction exercises the production code path.
     """
+    view = _build_main_view(tmp_path, monkeypatch)
+    try:
+        yield view
+    finally:
+        view.close()
+
+
+def _build_main_view(tmp_path, monkeypatch):
+    """Build the MainView for the main_view fixture"""
     monkeypatch.chdir(tmp_path)
     helper.initialize_repo()
 
@@ -62,9 +73,57 @@ def main_view(qapp, tmp_path, monkeypatch):
     context.cfg.reset()
     gitcmds.reset()
 
-    view = main_widget.MainView(context)
+    return main_widget.MainView(context)
+
+
+def _close_shortcut_actions(view):
+    close = QtGui.QKeySequence(QtGui.QKeySequence.Close)
+    return [
+        action
+        for action in view.findChildren(QtWidgets.QAction)
+        if close in action.shortcuts()
+    ]
+
+
+class _CloseWatcher(QtCore.QObject):
+    """Record the Close events a window receives, as the red button sends"""
+
+    def __init__(self, closes):
+        super().__init__()
+        self.closes = closes
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Close:
+            self.closes.append(True)
+        return False
+
+
+def test_cmd_w_closes_the_main_window_on_macos(qapp, tmp_path, monkeypatch):
+    """Cmd+W is a File menu "Close Window" item, the only action bound to it"""
+    monkeypatch.setattr(main_widget.core, 'IS_DARWIN', True)
+    view = _build_main_view(tmp_path, monkeypatch)
     try:
-        yield view
+        action = view.close_window_action
+        assert _close_shortcut_actions(view) == [action]
+        assert action in view.file_menu.actions()
+        view.show()
+        closes = []
+        watcher = _CloseWatcher(closes)
+        view.installEventFilter(watcher)
+        action.trigger()
+        qapp.processEvents()  # actions are connected queued
+        view.removeEventFilter(watcher)
+        assert closes == [True]
+    finally:
+        view.close()
+
+
+def test_close_window_action_is_macos_only(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(main_widget.core, 'IS_DARWIN', False)
+    view = _build_main_view(tmp_path, monkeypatch)
+    try:
+        assert view.close_window_action is None
+        assert _close_shortcut_actions(view) == []
     finally:
         view.close()
 
