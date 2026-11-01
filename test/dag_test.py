@@ -19,6 +19,8 @@ from cola.widgets.dag import _prepare_labels_cached
 from cola.widgets.dag import commit_matches
 from cola.widgets.dag import find_matches
 from cola.widgets.dag import next_match
+from cola.widgets.dag import row_runs
+from cola.widgets.dag import sort_by_generation
 from cola.widgets.filelist import FileTreeWidgetItem
 from cola.widgets.filelist import FileWidget
 from qtpy import QtCore
@@ -899,6 +901,66 @@ def test_select_moves_the_current_row(qapp, app_context):
     tree.keyPressEvent(event)
     assert tree.currentItem() is items[11]
     assert tree.selectedItems() == [items[11]]
+
+
+def test_row_runs_groups_consecutive_rows():
+    assert list(row_runs([])) == []
+    assert list(row_runs([4])) == [(4, 4)]
+    assert list(row_runs([0, 1, 2, 5, 7, 8])) == [(0, 2), (5, 5), (7, 8)]
+
+
+def _chunked_tree(app_context, count=30, chunk=10):
+    """A commit list loaded in oldest-first chunks, as the reader delivers it"""
+    tree = CommitTreeWidget(app_context, None)
+    commits = [_commit_for_graph(app_context, f'{idx:040x}') for idx in range(count)]
+    for start in range(0, count, chunk):
+        tree.add_commits(commits[start : start + chunk])
+    items = [tree.topLevelItem(idx) for idx in range(tree.topLevelItemCount())]
+    return tree, items
+
+
+def test_select_applies_runs_of_rows_as_ranges(qapp, app_context):
+    """Selecting many commits builds one range per run of rows
+
+    One setSelected() per row merged each into the selection model, which
+    took 389 s for Select All on 50000 commits.
+    """
+    tree, items = _chunked_tree(app_context)
+    # Rows are newest first across all three chunks.
+    assert [item.commit.oid for item in items] == [
+        f'{idx:040x}' for idx in reversed(range(30))
+    ]
+    wanted = [items[row] for row in (2, 3, 4, 15, 16, 28)]
+
+    tree.select([item.commit.oid for item in wanted])
+
+    assert tree.selectedItems() == wanted
+    assert tree.selectionModel().selection().count() == 3
+    assert tree.currentItem() is wanted[0]
+
+    tree.select([item.commit.oid for item in items])
+    assert len(tree.selectedItems()) == 30
+    assert tree.selectionModel().selection().count() == 1
+
+    tree.select([])
+    assert tree.selectedItems() == []
+
+
+def test_select_commits_skips_the_echo_of_its_own_selection(qapp, app_context):
+    """The list's own selection coming back from GitDAG is not reapplied"""
+    tree, items = _chunked_tree(app_context, count=6, chunk=6)
+    for item in items[1:4]:
+        item.setSelected(True)
+    tree.selection_changed()
+    emitted = sort_by_generation([item.commit for item in items[1:4]])
+    calls = []
+    tree.select = calls.append
+
+    tree.select_commits(emitted)
+    assert calls == []
+
+    tree.select_commits([items[5].commit])
+    assert calls == [[items[5].commit.oid]]
 
 
 def test_commit_matches_fields(app_context):
