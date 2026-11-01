@@ -538,6 +538,44 @@ def for_each_ref_basename(context: ApplicationContext, refs) -> list[Any]:
     return [x[offset:] for x in non_heads]
 
 
+def ref_targets(context: ApplicationContext) -> frozenset[tuple[str, str]]:
+    """Return (refname, commit oid) for every ref, with tags peeled to their commit"""
+    status, out, _ = context.git.for_each_ref(
+        format='%(objectname) %(*objectname) %(refname)', _readonly=True
+    )
+    if status != 0:
+        return frozenset()
+    targets = set()
+    for line in out.splitlines():
+        parts = line.split(' ', 2)
+        if len(parts) == 3:
+            oid, peeled, refname = parts
+            targets.add((refname, peeled or oid))
+    return frozenset(targets)
+
+
+def commit_decorations(context: ApplicationContext, oids: list[str]) -> dict[str, str]:
+    """Return each commit's "%d" decoration, read the way the DAG's log reads it"""
+    if not oids:
+        return {}
+    status, out, _ = context.git.log(
+        '--no-walk=unsorted',
+        '--stdin',
+        '--no-show-signature',
+        '--decorate=full',
+        '--format=%H%x01%d',
+        _input=('\n'.join(oids) + '\n').encode('utf-8'),
+        _readonly=True,
+    )
+    if status != 0:
+        return {}
+    decorations = {}
+    for line in out.splitlines():
+        oid, _, decoration = line.partition('\x01')
+        decorations[oid] = decoration
+    return decorations
+
+
 def _prefix_and_size(prefix: str, values: list[Any]) -> tuple[str, int, list[Any]]:
     """Return a tuple of (prefix, len(prefix) + 1, y) for <prefix>/ stripping"""
     return (prefix, len(prefix) + 1, values)
