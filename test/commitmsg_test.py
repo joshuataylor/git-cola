@@ -124,3 +124,19 @@ def test_summary_asks_input_methods_not_to_predict_or_capitalise(commit_editor):
     hints = commit_editor.summary.inputMethodHints()
     assert hints & Qt.ImhNoPredictiveText
     assert hints & Qt.ImhNoAutoUppercase
+
+
+def _cursor_label_colour(editor, summary, description=''):
+    editor.summary.set_value(summary)
+    editor.description.set_value(description)
+    editor.show_cursor_position(1, len(summary))
+    return editor.cursor_position_label.styleSheet()
+
+
+def test_summary_past_50_characters_tints_the_cursor_label(commit_editor):
+    """The subject convention gets the mildest warning colour, as a hint"""
+    assert _cursor_label_colour(commit_editor, 'x' * 50) == ''
+    assert 'yellow' in _cursor_label_colour(commit_editor, 'x' * 51)
+    # Body lines keep their own, longer limits.
+    assert _cursor_label_colour(commit_editor, 'short', 'y' * 60) == ''
+    assert '#ff8833' in _cursor_label_colour(commit_editor, 'x' * 73)
