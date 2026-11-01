@@ -15,6 +15,7 @@ from cola.widgets.dag import Commit as GraphicsCommit
 from cola.widgets.dag import CommitFindWidget
 from cola.widgets.dag import CommitTreeWidget
 from cola.widgets.dag import CommitTreeWidgetItem
+from cola.widgets.dag import FindState
 from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
 from cola.widgets.dag import _prepare_labels_cached
@@ -24,6 +25,7 @@ from cola.widgets.dag import file_pathspec
 from cola.widgets.dag import find_commits_with_git
 from cola.widgets.dag import find_matches
 from cola.widgets.dag import graph_row_pairs
+from cola.widgets.dag import match_spans
 from cola.widgets.dag import next_match
 from cola.widgets.dag import row_runs
 from cola.widgets.dag import sort_by_generation
@@ -1444,6 +1446,110 @@ def test_git_find_search_cancel_stops_its_process(monkeypatch):
     assert search.run() == set()
     assert proc.terminated
     assert started[0][:2] == ['git', 'log']
+
+
+def test_match_spans_finds_each_occurrence():
+    assert match_spans('Fix the fix', 'fix') == [(0, 3), (8, 3)]
+    assert match_spans('Fix the fix', 'fix', case_sensitive=True) == [(8, 3)]
+    assert match_spans('aaaa', 'aa') == [(0, 2), (2, 2)]
+    assert match_spans('', 'x') == []
+    assert match_spans('text', '') == []
+
+
+def test_find_state_badge_names_matches_that_are_not_on_screen(app_context):
+    commit = _commit_for_columns(app_context)
+    visible = {'summary', 'author', 'date'}
+    # Matches in visible cells are highlighted, so they need no badge.
+    assert FindState('ugit').badge(commit, visible) == ''
+    assert FindState('aguilar').badge(commit, visible) == ''
+    assert FindState('v0.0').badge(commit, visible) == 'in ref'
+    assert FindState('v0.0').badge(commit, visible | {'refs'}) == ''
+    assert FindState('ad454b').badge(commit, visible) == 'in hash'
+    assert FindState('josh').badge(commit, visible) == 'in committer, committer email'
+    git_kinds = {commit.oid: {'message', 'files'}}
+    assert FindState('body', git_kinds=git_kinds).badge(commit, visible) == (
+        'in message, files'
+    )
+    # The summary starts the message, so a summary match doesn't name it.
+    assert FindState('ugit', git_kinds=git_kinds).badge(commit, visible) == ('in files')
+
+
+def _hidden_rows(tree):
+    root = QtCore.QModelIndex()
+    return [
+        row for row in range(tree.topLevelItemCount()) if tree.isRowHidden(row, root)
+    ]
+
+
+def test_commit_find_shows_only_the_matching_commits(qapp, app_context):
+    """With Only Matches on, the list hides every commit that doesn't match"""
+    tree, find, items = _find_tree(app_context)
+    find.show()
+    find.text.setText('fix')
+    assert _hidden_rows(tree) == [0, 2, 5]
+    assert tree.find_state.needle == 'fix'
+    assert tree.find_state.filtering
+
+    # Commits added while filtering keep the right rows hidden.
+    newer = _commit_for_graph(app_context, f'{99:040x}')
+    newer.summary = 'fix in a newer commit'
+    older_hidden = [items[0], items[2], items[5]]
+    tree.add_commits([newer])
+    assert [item.isHidden() for item in older_hidden] == [True, True, True]
+    assert not tree.topLevelItem(0).isHidden()
+
+    find.only_matches_checkbox.click()
+    qapp.processEvents()  # checkbox clicks are queued
+    assert _hidden_rows(tree) == []
+    assert not tree.find_state.filtering
+
+    find.only_matches_checkbox.click()
+    qapp.processEvents()
+    assert _hidden_rows(tree) != []
+    find.text.setText('')
+    assert _hidden_rows(tree) == []
+    assert tree.find_state is None
+
+
+def test_commit_find_closing_shows_every_commit(qapp, app_context):
+    tree, find, _items = _find_tree(app_context)
+    find.show()
+    find.text.setText('fix number 3')
+    assert len(_hidden_rows(tree)) == 5
+    find.hide_find()
+    assert _hidden_rows(tree) == []
+    assert tree.find_state is None
+
+
+def _highlighted_pixels(image):
+    """Count the pixels tinted by FindState.highlight over a light background"""
+    count = 0
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            color = image.pixelColor(x, y)
+            if color.red() > 200 and color.green() > 180 and color.blue() < 170:
+                count += 1
+    return count
+
+
+def test_commit_find_highlights_the_matched_text(qapp, app_context):
+    """The matches are marked in the painted list, with and without the graph"""
+    tree, find, _items = _find_tree(app_context)
+    tree.resize(600, 220)
+    tree.setColumnWidth(CommitTreeWidgetItem.SUMMARY, 300)
+    palette = tree.palette()
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(Qt.white))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(Qt.black))
+    tree.setPalette(palette)
+    tree.clearSelection()
+    assert _highlighted_pixels(tree.grab().toImage()) == 0
+
+    tree.set_find_state(FindState('summary'))
+    assert _highlighted_pixels(tree.grab().toImage()) > 0
+    tree.display_inline_graph(False)
+    assert _highlighted_pixels(tree.grab().toImage()) > 0
+    tree.set_find_state(None)
+    assert _highlighted_pixels(tree.grab().toImage()) == 0
 
 
 def test_commit_find_escape_hides(qapp, app_context):

@@ -1015,6 +1015,209 @@ def _prepare_labels_cached(
     return tuple(result)
 
 
+# Which column shows each field find matches in memory, for the "matched in" badge.
+FIND_FIELD_COLUMNS = {
+    'summary': 'summary',
+    'author': 'author',
+    'email': 'email',
+    'committer': 'committer',
+    'committer_email': 'committer_email',
+    'ref': 'refs',
+    'oid': 'oid',
+}
+
+
+def find_field_names():
+    """Badge text for each kind of match, keyed like matched_fields() and git"""
+    return {
+        'author': N_('author'),
+        'email': N_('email'),
+        'committer': N_('committer'),
+        'committer_email': N_('committer email'),
+        'ref': N_('ref'),
+        'oid': N_('hash'),
+        'message': N_('message'),
+        'files': N_('files'),
+    }
+
+
+def matched_fields(commit, needle, case_sensitive=False):
+    """The in-memory fields of commit that find matches, in display order"""
+    if not needle:
+        return []
+    if case_sensitive:
+        fold = _identity
+    else:
+        fold = str.lower
+        needle = needle.lower()
+    fields = []
+    for key, value in (
+        ('summary', commit.summary),
+        ('author', commit.author),
+        ('email', commit.email),
+        ('committer', commit.committer),
+        ('committer_email', commit.committer_email),
+    ):
+        if value and needle in fold(value):
+            fields.append(key)
+    if any(needle in fold(tag) for tag in commit.tags):
+        fields.append('ref')
+    if fold(commit.oid or '').startswith(needle):
+        fields.append('oid')
+    return fields
+
+
+def _identity(value):
+    return value
+
+
+def match_spans(text, needle, case_sensitive=False):
+    """(start, length) of each non-overlapping occurrence of needle in text"""
+    if not text or not needle:
+        return []
+    if not case_sensitive:
+        text = text.lower()
+        needle = needle.lower()
+    spans = []
+    start = text.find(needle)
+    while start >= 0:
+        spans.append((start, len(needle)))
+        start = text.find(needle, start + len(needle))
+    return spans
+
+
+class FindState:
+    """What the find bar is looking for, as the commit list paints it"""
+
+    # Translucent, so it reads as a highlighter mark over the text in light
+    # and dark themes, and over the selection colour.
+    highlight = QtGui.QColor(255, 200, 0, 110)
+
+    def __init__(self, needle, case_sensitive=False, git_kinds=None, filtering=False):
+        self.needle = needle
+        self.case_sensitive = case_sensitive
+        self.git_kinds = git_kinds or {}
+        """oid -> {'message', 'files'}, the kinds git matched for that commit"""
+        self.filtering = filtering
+
+    def spans(self, text):
+        return match_spans(text, self.needle, self.case_sensitive)
+
+    def badge(self, commit, visible_columns):
+        """Text naming the matched fields that the visible cells don't show"""
+        fields = matched_fields(commit, self.needle, self.case_sensitive)
+        kinds = [
+            field
+            for field in fields
+            if FIND_FIELD_COLUMNS.get(field) not in visible_columns
+        ]
+        git_kinds = self.git_kinds.get(commit.oid, ())
+        # The summary is the start of the message: only name the message when
+        # the match is elsewhere in it.
+        if 'message' in git_kinds and 'summary' not in fields:
+            kinds.append('message')
+        if 'files' in git_kinds:
+            kinds.append('files')
+        if not kinds:
+            return ''
+        names = find_field_names()
+        return N_('in %s') % ', '.join(names[kind] for kind in kinds)
+
+    def paint_spans(self, painter, text, text_x, rect, font_metrics):
+        """Mark each match in text, drawn from text_x, within rect"""
+        for start, length in self.spans(text):
+            left = text_x + font_metrics.horizontalAdvance(text[:start])
+            if left >= rect.right():
+                break
+            width = font_metrics.horizontalAdvance(text[start : start + length])
+            mark = QtCore.QRect(
+                int(left), rect.top() + 1, int(width), rect.height() - 2
+            )
+            painter.fillRect(mark.intersected(rect), self.highlight)
+
+    @staticmethod
+    def badge_rect(badge, rect, font_metrics):
+        """Where the badge goes: the right end of rect"""
+        width = font_metrics.horizontalAdvance(badge) + 10
+        height = font_metrics.height()
+        return QtCore.QRect(
+            rect.right() - width - 4,
+            rect.center().y() - height // 2,
+            width,
+            height,
+        )
+
+    def paint_badge(self, painter, badge, rect, option):
+        """Draw the "in message, files" badge at the right end of rect"""
+        badge_rect = self.badge_rect(badge, rect, option.fontMetrics)
+        if badge_rect.left() <= rect.left():
+            return
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(self.highlight)
+        painter.drawRoundedRect(badge_rect, 4, 4)
+        painter.setPen(option.palette.text().color())
+        painter.drawText(badge_rect, Qt.AlignCenter, badge)
+        painter.restore()
+
+
+class FindHighlightDelegate(QtWidgets.QStyledItemDelegate):
+    """Paint a cell as usual, then mark the find bar's matches in its text"""
+
+    def paint(self, painter, option, index):
+        tree = self.parent()
+        state = getattr(tree, 'find_state', None)
+        if state is None:
+            super().paint(painter, option, index)
+            return
+        # Without the inline graph the summary column paints here.
+        badge = ''
+        if index.column() == CommitTreeWidgetItem.SUMMARY:
+            item = tree.itemFromIndex(index)
+            if item is not None:
+                badge = state.badge(item.commit, tree.visible_column_keys())
+        cell = QtWidgets.QStyleOptionViewItem(option)
+        if badge:
+            # The text stops short of the badge instead of running under it.
+            badge_rect = state.badge_rect(badge, option.rect, option.fontMetrics)
+            if badge_rect.left() > option.rect.left():
+                # The view has painted the row's background, but a selected
+                # cell paints its own: carry it on under the badge.
+                if option.state & QtWidgets.QStyle.State_Selected:
+                    painter.fillRect(
+                        QtCore.QRect(
+                            badge_rect.left() - 4,
+                            option.rect.top(),
+                            option.rect.right() - badge_rect.left() + 5,
+                            option.rect.height(),
+                        ),
+                        option.palette.highlight(),
+                    )
+                cell.rect = QtCore.QRect(option.rect)
+                cell.rect.setRight(badge_rect.left() - 4)
+        super().paint(painter, cell, index)
+        text = index.data(Qt.DisplayRole)
+        opt = QtWidgets.QStyleOptionViewItem(cell)
+        self.initStyleOption(opt, index)
+        style = tree.style() if tree is not None else QtWidgets.QApplication.style()
+        text_rect = style.subElementRect(
+            QtWidgets.QStyle.SE_ItemViewItemText, opt, tree
+        )
+        margin = (
+            style.pixelMetric(QtWidgets.QStyle.PM_FocusFrameHMargin, None, tree) + 1
+        )
+        if text:
+            painter.save()
+            painter.setClipRect(text_rect)
+            state.paint_spans(
+                painter, text, text_rect.left() + margin, text_rect, option.fontMetrics
+            )
+            painter.restore()
+        if badge:
+            state.paint_badge(painter, badge, option.rect, option)
+
+
 class GraphDelegate(QtWidgets.QStyledItemDelegate):
     LANE_WIDTH = 16
     DOT_RADIUS = 5
@@ -1097,8 +1300,13 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
         if option.state & QtWidgets.QStyle.State_Selected:
             painter.fillRect(rect, option.palette.highlight())
 
+        tree = self.parent()
+        state = getattr(tree, 'find_state', None)
+        # Hidden rows break the lanes, so a filtered list shows only the dots.
+        filtering = state is not None and state.filtering
+
         # Draw the graph if we have graph data.
-        if row is not None or prev_row is not None:
+        if (row is not None or prev_row is not None) and not filtering:
             pen = QtGui.QPen()
             pen.setWidth(self.EDGE_WIDTH)
             pen.setCapStyle(Qt.FlatCap)
@@ -1158,18 +1366,21 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
                         )
                         painter.drawPath(path)
 
-            if row is not None:
+        if row is not None:
+            if not filtering:
                 cx = rect.left() + row.commit_column * lane_w + lane_w // 2
-                color_map = {
-                    GraphRowColor.NORMAL: self.commit_color,
-                    GraphRowColor.MERGE: self.merge_color,
-                    GraphRowColor.HEAD: self.current_head_color,
-                }
-                painter.setPen(self.outline_pen)
-                painter.setBrush(color_map[row.color])
-                painter.drawEllipse(
-                    QtCore.QPointF(cx, mid_y), self.DOT_RADIUS, self.DOT_RADIUS
-                )
+            else:
+                cx = rect.left() + lane_w // 2
+            color_map = {
+                GraphRowColor.NORMAL: self.commit_color,
+                GraphRowColor.MERGE: self.merge_color,
+                GraphRowColor.HEAD: self.current_head_color,
+            }
+            painter.setPen(self.outline_pen)
+            painter.setBrush(color_map[row.color])
+            painter.drawEllipse(
+                QtCore.QPointF(cx, mid_y), self.DOT_RADIUS, self.DOT_RADIUS
+            )
 
         commit = index.data(COMMIT_ROLE)
 
@@ -1178,22 +1389,33 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
 
         if commit and commit.tags:
             painter.setFont(option.font)
-            tree = self.parent()
             item = tree.itemFromIndex(index) if tree else None
             labels_width = self._draw_labels(
                 painter, mid_y, commit.tags, label_x, option.fontMetrics, item
             )
 
+        badge = ''
+        if state is not None and commit is not None:
+            badge = state.badge(commit, tree.visible_column_keys())
         text = index.data(Qt.DisplayRole)
         if text:
             text_x = int(label_x + labels_width + 8)
             text_rect = rect.adjusted(text_x - rect.left(), 0, 0, 0)
+            if badge:
+                # The text stops short of the badge instead of running under it.
+                badge_rect = state.badge_rect(badge, rect, option.fontMetrics)
+                text_rect.setRight(max(text_rect.left(), badge_rect.left() - 4))
+            if state is not None:
+                state.paint_spans(painter, text, text_x, text_rect, option.fontMetrics)
             painter.setPen(option.palette.text().color())
             painter.drawText(
                 text_rect,
                 Qt.AlignLeft | Qt.AlignVCenter,
                 text,
             )
+
+        if badge:
+            state.paint_badge(painter, badge, rect, option)
 
         painter.restore()
 
@@ -1286,6 +1508,10 @@ class GraphDelegate(QtWidgets.QStyledItemDelegate):
 
     def _graph_width(self, row, prev_row):
         """Calculate the width needed for the graph."""
+        # A filtered list draws each commit's dot in the first lane only.
+        state = getattr(self.parent(), 'find_state', None)
+        if state is not None and state.filtering:
+            return self.LANE_WIDTH
         if row is None and prev_row is None:
             return 0
         max_col = 0
@@ -1548,6 +1774,11 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             self.setColumnHidden(idx, not column.visible)
 
         self.graph_delegate = GraphDelegate(self)
+        self.setItemDelegate(FindHighlightDelegate(self))
+        self.find_state = None
+        """The find bar's FindState while it has text, for highlighting"""
+        self._hidden_positions = set()
+        """Positions in self.commits of the rows the find bar hides"""
         self.context = context
         self.oidmap = {}
         # Full commit messages shown as hover tooltips, keyed by oid. Tooltip
@@ -1586,6 +1817,35 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             for idx, column in enumerate(self.columns)
             if not self.isColumnHidden(idx)
         ]
+
+    def visible_column_keys(self):
+        """The keys of the columns being displayed"""
+        return {column.key for _idx, column in self.visible_columns()}
+
+    def set_find_state(self, state):
+        """Highlight the find bar's matches, or stop with None"""
+        self.find_state = state
+        self.viewport().update()
+
+    def show_only_rows(self, rows):
+        """Hide every row not in rows, or show them all again with None"""
+        last = len(self.commits) - 1
+        if rows is None:
+            hidden = set()
+        else:
+            hidden = set(range(len(self.commits))).difference(
+                last - row for row in rows
+            )
+        to_hide = hidden - self._hidden_positions
+        to_show = self._hidden_positions - hidden
+        if not to_hide and not to_show:
+            return
+        root = QtCore.QModelIndex()
+        for position in to_hide:
+            self.setRowHidden(last - position, root, True)
+        for position in to_show:
+            self.setRowHidden(last - position, root, False)
+        self._hidden_positions = hidden
 
     def render_commits(self, oids):
         """Re-render the visible cells of the commits, e.g. after their labels changed"""
@@ -1828,6 +2088,7 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         self._message_tooltips.clear()
         self.commits = []
         self._selected_oids = frozenset()
+        self._hidden_positions = set()
         self.commits_changed.emit()
 
     def event(self, event):
@@ -2120,6 +2381,8 @@ class CommitFindWidget(QtWidgets.QWidget):
         """(needle, case_sensitive, indices into tree.commits) of the last scan"""
         self._git_oids = set()
         """Oids git matched for the current criteria"""
+        self._matched_kinds = {}
+        """oid -> the kinds ('message', 'files') git matched it by"""
         self._git_pending = 0
         self._searches = []
         """The GitFindSearch objects of the current criteria, stopped when stale"""
@@ -2161,6 +2424,11 @@ class CommitFindWidget(QtWidgets.QWidget):
             tooltip=N_('Also search the paths of the files each commit changed'),
             checked=True,
         )
+        self.only_matches_checkbox = qtutils.checkbox(
+            N_('Only Matches'),
+            tooltip=N_('Hide the commits that do not match'),
+            checked=True,
+        )
         self.count_label = QtWidgets.QLabel(self)
         self.close_button = qtutils.create_action_button(
             tooltip=N_('Close the find bar'), icon=icons.close()
@@ -2175,6 +2443,7 @@ class CommitFindWidget(QtWidgets.QWidget):
             self.match_case_checkbox,
             self.messages_checkbox,
             self.files_checkbox,
+            self.only_matches_checkbox,
             self.count_label,
             qtutils.STRETCH,
             self.close_button,
@@ -2196,6 +2465,9 @@ class CommitFindWidget(QtWidgets.QWidget):
             self.files_checkbox,
         ):
             qtutils.connect_checkbox(checkbox, lambda _: self._criteria_changed())
+        qtutils.connect_checkbox(
+            self.only_matches_checkbox, lambda _: self._refresh_view()
+        )
 
     def show_find(self):
         """Show the find bar and focus it, selecting any previous text"""
@@ -2209,11 +2481,13 @@ class CommitFindWidget(QtWidgets.QWidget):
         if self.text.get():
             self._matches = None
             self._schedule_git_search()
+            self._refresh_view()
 
     def hide_find(self):
         """Hide the find bar and return focus to where it was opened from"""
         self._cancel_git_search()
         self.hide()
+        self._refresh_view()
         widget = self._return_focus
         self._return_focus = None
         if widget is None or not widget.isVisible():
@@ -2229,6 +2503,7 @@ class CommitFindWidget(QtWidgets.QWidget):
         # Commits arrive in chunks while the list loads: search the new ones too.
         if self.isVisible() and self.text.get():
             self._schedule_git_search()
+            self._refresh_view()
 
     def search(self):
         """Select the next matching commit"""
@@ -2265,6 +2540,7 @@ class CommitFindWidget(QtWidgets.QWidget):
         self._generation += 1
         self._git_timer.stop()
         self._git_oids = set()
+        self._matched_kinds = {}
         self._git_pending = 0
         searches, self._searches = self._searches, []
         for search in searches:
@@ -2298,17 +2574,23 @@ class CommitFindWidget(QtWidgets.QWidget):
             task = qtutils.SimpleTask(search.run)
             self._runtask.start(
                 task,
-                result=lambda found: self._apply_git_matches(generation, found),
+                result=lambda found, kind=kind: self._apply_git_matches(
+                    generation, found, kind
+                ),
             )
 
-    def _apply_git_matches(self, generation, found):
+    def _apply_git_matches(self, generation, found, kind=None):
         """Add git's matches, and jump to one if the selection isn't a match"""
         if generation != self._generation:
             return
         self._git_pending = max(0, self._git_pending - 1)
+        if kind is not None:
+            for oid in found:
+                self._matched_kinds.setdefault(oid, set()).add(kind)
         new = found - self._git_oids
         if not new:
             self._update_count(self._matching_rows())
+            self._refresh_view()
             return
         self._git_oids |= new
         self._matches = None
@@ -2323,6 +2605,26 @@ class CommitFindWidget(QtWidgets.QWidget):
             self._jumped_oid = current.commit.oid if current is not None else None
         else:
             self._update_count(matches)
+        self._refresh_view()
+
+    def _refresh_view(self):
+        """Highlight the matches in the list, and hide the rest if asked to"""
+        tree = self._tree
+        needle = self.text.get()
+        if not needle or not self.isVisible():
+            tree.set_find_state(None)
+            tree.show_only_rows(None)
+            return
+        filtering = self.only_matches_checkbox.isChecked()
+        tree.set_find_state(
+            FindState(
+                needle,
+                case_sensitive=self.match_case_checkbox.isChecked(),
+                git_kinds=self._matched_kinds,
+                filtering=filtering,
+            )
+        )
+        tree.show_only_rows(set(self._matching_rows()) if filtering else None)
 
     def _text_indices(self, needle, case_sensitive):
         """Indices into tree.commits of the in-memory matches"""
@@ -2406,6 +2708,7 @@ class CommitFindWidget(QtWidgets.QWidget):
             item = self._tree.topLevelItem(row)
             self._tree.select([item.commit.oid])
         self._update_count(matches, row)
+        self._refresh_view()
 
 
 class GitDAG(standard.MainWindow):
