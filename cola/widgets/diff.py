@@ -945,13 +945,7 @@ class Viewer(QtWidgets.QFrame):
         self.images = []
         self.pixmaps = []
         self.sources = []
-        italic_font = self.font()
-        italic_font.setItalic(True)
-
-        self.filename = PlainTextLabel(parent=self)
-        self.filename.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        self.filename.setFont(italic_font)
-        self.filename.elide()
+        self.filename = filename_label(self)
         self.options = options = Options(self, filename=self.filename)
 
         diffstat_font = self.font()
@@ -1448,6 +1442,21 @@ def render_comp_image(sources, mode, scale):
     pixmap = QtGui.QPixmap.fromImage(image)
     pixmap.setDevicePixelRatio(scale)
     return pixmap
+
+
+def filename_label(parent):
+    """The italic, eliding label naming the file whose diff is shown
+
+    A plain click copies the full path, even when the label is elided. A
+    click and drag still selects text.
+    """
+    label = PlainTextLabel(copy_on_click=True, parent=parent)
+    italic_font = label.font()
+    italic_font.setItalic(True)
+    label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+    label.setFont(italic_font)
+    label.elide()
+    return label
 
 
 class Options(QtWidgets.QWidget):
