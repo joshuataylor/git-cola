@@ -1167,6 +1167,73 @@ def test_graph_row_pairs_link_each_row_to_the_one_above():
     assert graph_row_pairs([]) == []
 
 
+def test_set_labels_replaces_tags_and_branches(app_context):
+    commit = _commit_for_columns(app_context)
+    commit.set_labels(' (HEAD -> refs/heads/main, tag: refs/tags/v1, refs/remotes/o/x)')
+    assert list(commit.tags) == ['HEAD', 'heads/main', 'tags/v1', 'remotes/o/x']
+    assert list(commit.branches) == ['main']
+    commit.set_labels('')
+    assert list(commit.tags) == []
+    assert list(commit.branches) == []
+
+
+def test_relabel_commits_moves_labels_without_a_reload(qapp, app_context):
+    """A branch created, moved or deleted relabels only the commits involved"""
+    helper.commit_files()
+    for name in ('B', 'C'):
+        helper.write_file(name, name)
+        helper.run_git('add', name)
+        helper.run_git('commit', '-q', '-m', name)
+    app_context.model.update_status()  # the reader checks for local branches
+    reader = dag.RepoReader(app_context, dag.DAG('HEAD', 10))
+    reader.reset()
+    commits = list(reader.get())
+    first, _middle, head = commits
+
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    win.context = app_context
+    win.model = app_context.model
+    win.commits = {}
+    for commit in commits:
+        win.commits[commit.oid] = commit
+        for tag in commit.tags:
+            win.commits[tag] = commit
+    win.treewidget = CommitTreeWidget(app_context, win)
+    win.treewidget.add_commits(commits)
+    win.graphview = MagicMock()
+    win.graphview_dock = MagicMock()
+    win.graphview_dock.isVisible.return_value = False
+    win._graph_stale = False
+    win._graph_build_id = 1
+    tree = win.treewidget
+
+    before = win._ref_state()
+    helper.run_git('branch', 'topic', first.oid)
+    after = win._ref_state()
+    win.relabel_commits(before, after)
+    assert 'heads/topic' in first.tags
+    assert win.commits['heads/topic'] is first
+    assert tree.oidmap['heads/topic'] is tree.oidmap[first.oid]
+    # Labels lay out the graph canvas, so it is rebuilt on its next showing.
+    win.graphview.clear.assert_called_once()
+    assert win._graph_stale
+
+    helper.run_git('branch', '-f', 'topic', head.oid)
+    moved = win._ref_state()
+    win.relabel_commits(after, moved)
+    assert 'heads/topic' not in first.tags
+    assert 'heads/topic' in head.tags
+    assert 'HEAD' in head.tags
+    assert tree.oidmap['heads/topic'] is tree.oidmap[head.oid]
+
+    helper.run_git('branch', '-D', 'topic')
+    win.relabel_commits(moved, win._ref_state())
+    assert 'heads/topic' not in head.tags
+    assert 'heads/topic' not in win.commits
+    assert 'heads/topic' not in tree.oidmap
+
+
 def test_row_runs_groups_consecutive_rows():
     assert list(row_runs([])) == []
     assert list(row_runs([4])) == [(4, 4)]

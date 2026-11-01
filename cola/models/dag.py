@@ -357,11 +357,18 @@ class Commit:
             self.generation = generation
 
         if tags:
-            for tag in tags[2:-1].split(', '):
-                self.add_label(tag)
+            self.set_labels(tags)
 
         self.parsed = True
         return self
+
+    def set_labels(self, decoration: str) -> None:
+        """Replace the labels with those of a " (ref, ref)" %d decoration"""
+        self.tags = ()
+        self.branches = ()
+        if decoration:
+            for tag in decoration.strip()[1:-1].split(', '):
+                self.add_label(tag)
 
     def add_label(self, tag: str) -> None:
         """Add tag/branch labels from `git log --decorate ....`"""
