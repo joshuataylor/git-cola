@@ -1251,6 +1251,35 @@ def test_a_replaced_reader_signals_are_ignored(qapp, app_context):
     win.thread_end.assert_not_called()
 
 
+def test_a_second_reader_does_not_disturb_one_in_progress(app_context):
+    """Each RepoReader has its own CommitFactory
+
+    The commit message menu and the sequence editor read commits too. With
+    one class-level factory, their reset cleared it under the DAG's reader
+    mid-parse, so its commits got parents that weren't in its own list.
+    """
+    helper.commit_files()
+    for name in ('B', 'C', 'D', 'E'):
+        helper.write_file(name, name)
+        helper.run_git('add', name)
+        helper.run_git('commit', '-q', '-m', name)
+    app_context.model.update_status()  # the reader checks for local branches
+
+    first = dag.RepoReader(app_context, dag.DAG('HEAD', 10))
+    reading = first.get()
+    commits = [next(reading), next(reading)]
+    other = dag.RepoReader(app_context, dag.DAG('HEAD', 2))
+    assert len(list(other.get())) == 2
+    commits.extend(reading)
+
+    assert len(commits) == 5
+    by_oid = {commit.oid: commit for commit in commits}
+    for commit in commits:
+        for parent in commit.parents:
+            assert by_oid[parent.oid] is parent
+            assert commit in parent.children
+
+
 def test_set_labels_replaces_tags_and_branches(app_context):
     commit = _commit_for_columns(app_context)
     commit.set_labels(' (HEAD -> refs/heads/main, tag: refs/tags/v1, refs/remotes/o/x)')
