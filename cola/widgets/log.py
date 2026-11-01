@@ -18,10 +18,16 @@ class LogWidget(QtWidgets.QFrame):
 
     channel = Signal(object)
 
+    # Lines kept. Unstaging in a big worktree logs git's whole list of
+    # remaining paths every time, so an uncapped log grew without limit.
+    MAX_LINES = 10000
+
     def __init__(self, context, parent=None, output=None, display_usage=True):
         QtWidgets.QFrame.__init__(self, parent)
 
         self.output_text = text.VimTextEdit(context, parent=self)
+        # The document drops its oldest lines past the limit.
+        self.output_text.document().setMaximumBlockCount(self.MAX_LINES)
         self.highlighter = LogSyntaxHighlighter(self.output_text.document())
         if output:
             self.set_output(output)
