@@ -18,10 +18,12 @@ from cola.widgets.dag import CommitTreeWidgetItem
 from cola.widgets.dag import GitDAG
 from cola.widgets.dag import _prepare_labels
 from cola.widgets.dag import _prepare_labels_cached
+from cola.widgets.dag import commit_graph
 from cola.widgets.dag import commit_matches
 from cola.widgets.dag import file_pathspec
 from cola.widgets.dag import find_commits_with_git
 from cola.widgets.dag import find_matches
+from cola.widgets.dag import graph_row_pairs
 from cola.widgets.dag import next_match
 from cola.widgets.dag import row_runs
 from cola.widgets.dag import sort_by_generation
@@ -906,6 +908,61 @@ def test_select_moves_the_current_row(qapp, app_context):
     tree.keyPressEvent(event)
     assert tree.currentItem() is items[11]
     assert tree.selectedItems() == [items[11]]
+
+
+def _graph_rows(tree):
+    """(oid, column, previous row's oid) for each row, top to bottom"""
+    result = []
+    for idx in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(idx)
+        row = item.data(CommitTreeWidgetItem.SUMMARY, GRAPH_ROW_ROLE)
+        prev = item.data(CommitTreeWidgetItem.SUMMARY, GRAPH_PREV_ROW_ROLE)
+        result.append(
+            (row.commit_oid, row.commit_column, prev.commit_oid if prev else None)
+        )
+    return result
+
+
+def test_graph_built_once_joins_up_across_chunks(qapp, app_context):
+    """Rows from one commit_graph() over every commit join up across chunks
+
+    A graph built per 2048-commit chunk started each chunk with no lanes, so
+    every lane was cut where two chunks met.
+    """
+    # Two branches that run side by side across the chunk boundary.
+    root = _commit_for_graph(app_context, f'{0:040x}')
+    commits = [root]
+    left, right = root, root
+    for idx in range(1, 9):
+        left = _commit_for_graph(app_context, f'{idx:040x}', parents=[left])
+        right = _commit_for_graph(app_context, f'{idx + 100:040x}', parents=[right])
+        commits.extend([left, right])
+    merge = _commit_for_graph(app_context, f'{999:040x}', parents=[left, right])
+    commits.append(merge)
+
+    whole = CommitTreeWidget(app_context, None)
+    whole.add_commits(commits)
+
+    pairs = {
+        pair[0].commit_oid: pair for pair in graph_row_pairs(commit_graph(commits).rows)
+    }
+    chunked = CommitTreeWidget(app_context, None)
+    for start in range(0, len(commits), 6):
+        chunk = commits[start : start + 6]
+        chunked.add_commits(chunk, graph_rows=[pairs[c.oid] for c in chunk])
+
+    assert _graph_rows(chunked) == _graph_rows(whole)
+    # The old way: each chunk on its own breaks the lanes at the boundaries.
+    separate = CommitTreeWidget(app_context, None)
+    for start in range(0, len(commits), 6):
+        separate.add_commits(commits[start : start + 6])
+    assert _graph_rows(separate) != _graph_rows(whole)
+
+
+def test_graph_row_pairs_link_each_row_to_the_one_above():
+    rows = ['a', 'b', 'c']
+    assert graph_row_pairs(rows) == [('a', None), ('b', 'a'), ('c', 'b')]
+    assert graph_row_pairs([]) == []
 
 
 def test_row_runs_groups_consecutive_rows():
