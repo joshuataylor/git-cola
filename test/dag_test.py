@@ -967,6 +967,36 @@ def test_graph_row_pairs_link_each_row_to_the_one_above():
     assert graph_row_pairs([]) == []
 
 
+def test_commit_messages_reads_every_message_in_order(app_context):
+    """One git call returns the selected messages in the selection's order"""
+    helper.commit_files()
+    oids = []
+    for name in ('B', 'C'):
+        helper.write_file(name, name)
+        helper.run_git('add', name)
+        helper.run_git(
+            'commit', '-q', '-m', f'subject {name}', '-m', 'wrapped\nbody text'
+        )
+        oids.append(helper.run_git('rev-parse', 'HEAD').strip())
+    first, second = oids
+
+    messages = dag_widgets.commit_messages(app_context, [second, dag.WORKTREE, first])
+    assert messages == [
+        'subject C\n\nwrapped\nbody text',
+        'subject B\n\nwrapped\nbody text',
+    ]
+    unwrapped = dag_widgets.commit_messages(app_context, [first], unwrap=True)
+    assert unwrapped == ['subject B\n\nwrapped body text']
+    assert unwrapped == [dag_widgets.commit_message(app_context, first, unwrap=True)]
+    assert dag_widgets.commit_messages(app_context, [dag.STAGE]) == []
+    # A bad oid fails the batch: fall back to one call each.
+    missing = '0' * 40
+    assert dag_widgets.commit_messages(app_context, [first, missing]) == [
+        'subject B\n\nwrapped\nbody text',
+        '',
+    ]
+
+
 def test_set_labels_replaces_tags_and_branches(app_context):
     commit = _commit_for_columns(app_context)
     commit.set_labels(' (HEAD -> refs/heads/main, tag: refs/tags/v1, refs/remotes/o/x)')

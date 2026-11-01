@@ -112,8 +112,12 @@ MESSAGES = {
 }
 
 
-def _fake_log(_context, _count, oid, *_args, **_kwargs):
-    return MESSAGES[oid]
+def _fake_log(_context, *args, **kwargs):
+    """git log for one oid ("-1 <oid>"), or a NUL-separated --stdin batch"""
+    if '--stdin' in args:
+        oids = kwargs['_input'].decode('utf-8').split()
+        return ''.join(MESSAGES[oid] + '\0' for oid in oids)
+    return MESSAGES[args[1]]
 
 
 def test_copy_commit_message_keeps_wrapping():
