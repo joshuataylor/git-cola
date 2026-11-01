@@ -463,3 +463,31 @@ def test_add_with_no_paths_runs_nothing(app_context, monkeypatch):
     status, _, _ = gitcmds.add(app_context, [])
     assert status == 0
     git_add.assert_not_called()
+
+
+def test_ref_targets_peel_tags_to_their_commit(app_context):
+    helper.commit_files()
+    head = helper.run_git('rev-parse', 'HEAD').strip()
+    helper.run_git('branch', 'topic')
+    helper.run_git('tag', 'light')
+    helper.run_git('tag', '-a', '-m', 'annotated', 'heavy')
+    targets = gitcmds.ref_targets(app_context)
+    assert ('refs/heads/topic', head) in targets
+    assert ('refs/tags/light', head) in targets
+    # An annotated tag points at a tag object: the commit is what gets labelled.
+    assert ('refs/tags/heavy', head) in targets
+
+
+def test_commit_decorations_match_the_dag_log(app_context):
+    helper.commit_files()
+    first = helper.run_git('rev-parse', 'HEAD').strip()
+    helper.write_file('B', 'b\n')
+    helper.run_git('add', 'B')
+    helper.run_git('commit', '-q', '-m', 'second')
+    second = helper.run_git('rev-parse', 'HEAD').strip()
+    helper.run_git('tag', 'v1', first)
+
+    decorations = gitcmds.commit_decorations(app_context, [first, second])
+    assert decorations[first] == ' (tag: refs/tags/v1)'
+    assert decorations[second].startswith(' (HEAD -> refs/heads/')
+    assert gitcmds.commit_decorations(app_context, []) == {}
