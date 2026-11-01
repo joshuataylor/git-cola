@@ -1053,6 +1053,14 @@ class MainView(standard.MainWindow):
         self.prefs_model.config_updated.connect(self._config_updated)
         self.commit_menu.aboutToShow.connect(self.update_menu_actions)
         self.open_recent_menu.aboutToShow.connect(self.build_recent_menu)
+        if core.IS_DARWIN:
+            # Right-clicking the Dock icon offers the recent repositories.
+            # Qt emits aboutToShow from applicationDockMenu: each time.
+            self.dock_menu = QtWidgets.QMenu(self)
+            self.dock_menu.aboutToShow.connect(self.build_dock_menu)
+            self.dock_menu.setAsDockMenu()
+        else:
+            self.dock_menu = None
 
         self.diffeditor.options_changed.connect(self.statuswidget.refresh)
         self.diffeditor.up.connect(self.statuswidget.move_up)
@@ -1198,12 +1206,24 @@ class MainView(standard.MainWindow):
         menu.exec_(event.globalPos())
 
     def build_recent_menu(self):
-        open_repo_cmd = cmds.OpenRepo
+        menu = self.open_recent_menu
+        menu.clear()
+        self._add_recent_repos(menu)
+
+    def build_dock_menu(self):
+        """Fill the macOS Dock icon's menu: recent repositories, a new window"""
+        menu = self.dock_menu
+        menu.clear()
+        self._add_recent_repos(menu)
+        if menu.actions():
+            menu.addSeparator()
+        menu.addAction(self.open_repo_new_action)
+
+    def _add_recent_repos(self, menu):
+        """Add an action that opens each recent repository here to menu"""
         context = self.context
         settings = context.settings
         settings.load()
-        menu = self.open_recent_menu
-        menu.clear()
         worktree = context.git.worktree()
 
         for entry in settings.recent:
@@ -1213,7 +1233,7 @@ class MainView(standard.MainWindow):
                 continue
             name = entry['name']
             text = f'{name} {chr(0x2192)} {directory}'
-            menu.addAction(text, cmds.run(open_repo_cmd, context, directory))
+            menu.addAction(text, cmds.run(cmds.OpenRepo, context, directory))
 
     def _config_updated(self, _source, config, value):
         if config == prefs.FONTDIFF:
