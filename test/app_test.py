@@ -189,6 +189,7 @@ def _make_qapplication(context):
     instance.context = context
     instance._pending_repo_paths = []
     instance._launch_paths = set()
+    instance.startup_dialog = None
     return instance
 
 
@@ -223,6 +224,60 @@ def test_open_repo_path_buffers_until_view_exists(monkeypatch, app_context):
     instance.flush_pending_repo_paths()
     assert opened == [root]
     assert instance._pending_repo_paths == []
+
+
+def test_open_repo_path_answers_the_startup_prompt(monkeypatch, app_context):
+    """A repository opened with the app at launch answers the --prompt picker
+
+    It used to wait for the main window, so the picker showed first and the
+    repository opened after whatever was picked.
+    """
+    opened = []
+    monkeypatch.setattr(app, 'open_worktree', lambda ctx, wt: opened.append(wt))
+    context = MagicMock()
+    context.view = None
+    instance = _make_qapplication(context)
+    instance.startup_dialog = MagicMock()
+    root = core.abspath(core.getcwd())
+
+    instance.open_repo_path(root)
+
+    instance.startup_dialog.open_path.assert_called_once_with(root)
+    assert instance._pending_repo_paths == []
+    assert opened == []
+
+
+class _FakeColaApp:
+    def __init__(self, pending=None):
+        self.pending = list(pending or [])
+        self.dialogs = []
+
+    def take_pending_repo_path(self):
+        return self.pending.pop(0) if self.pending else None
+
+    def set_startup_dialog(self, dialog):
+        self.dialogs.append(dialog)
+
+
+def test_launch_repo_skips_the_prompt(monkeypatch):
+    """A repository that arrived before the prompt is used without asking"""
+    dialog = MagicMock()
+    monkeypatch.setattr(app.startup, 'StartupDialog', dialog)
+    context = MagicMock()
+    context.app = _FakeColaApp(pending=['/repo'])
+    assert app._launch_repo_or_prompt(context, None) == '/repo'
+    dialog.assert_not_called()
+
+
+def test_prompt_takes_launch_repos_while_open(monkeypatch):
+    """The picker is registered for FileOpen while it is open, then cleared"""
+    dialog = MagicMock()
+    dialog.return_value.find_git_repo.return_value = '/picked'
+    monkeypatch.setattr(app.startup, 'StartupDialog', dialog)
+    context = MagicMock()
+    context.app = cola_app = _FakeColaApp()
+    assert app._launch_repo_or_prompt(context, None) == '/picked'
+    assert cola_app.dialogs == [dialog.return_value, None]
 
 
 def test_open_repo_path_ignores_non_repository(monkeypatch, tmp_path):
