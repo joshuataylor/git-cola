@@ -1845,13 +1845,17 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
         text = self._message_tooltips[oid] = format_message_tooltip(message)
         return text
 
-    def add_commits(self, commits):
-        """Add commits to the tree"""
+    def add_commits(self, commits, graph_rows=None):
+        """Add commits to the tree
+
+        graph_rows is a list of (row, previous_row) pairs for these commits from
+        one commit_graph() over the whole list (see ReaderThread). Without it the
+        graph is built for these commits alone, which only joins up with commits
+        added before or after when they are added together.
+        """
         base = len(self.commits)
         self.commits.extend(commits)
         items = []
-        head = 'HEAD'
-        head_oid = None
         renderer = CommitRenderer(self.context)
         columns = self.visible_columns()
         for offset in range(len(commits) - 1, -1, -1):
@@ -1862,19 +1866,12 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
             self.oidmap[commit.oid] = item
             for tag in commit.tags:
                 self.oidmap[tag] = item
-                if tag == head:
-                    head_oid = commit.oid
 
-        graph_result = build_graph(
-            [
-                (commit.oid, [parent.oid for parent in commit.parents])
-                for commit in commits
-            ],
-            head_oid=head_oid,
-        )
+        if graph_rows is None:
+            graph_rows = graph_row_pairs(commit_graph(commits).rows)
         # Before the items join the tree: setData() on an item in a tree
         # notifies the view on every call, about 5 us each and three per row.
-        self.apply_graph_result(graph_result)
+        self.apply_graph_rows(graph_rows)
         self.insertTopLevelItems(0, items)
         # Resize column to fit content after graph data is loaded.
         if self._column_init_state < ColumnInitState.GRAPH:
@@ -1885,10 +1882,13 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
 
     def apply_graph_result(self, graph_result) -> None:
         """Attach the graph rows to the items of the commits just added"""
-        # Rows only describe the chunk that was just added, so resolve them
-        # through the oid->item map instead of rescanning every tree item.
-        prev_row = None
-        for row in graph_result.rows:
+        self.apply_graph_rows(graph_row_pairs(graph_result.rows))
+
+    def apply_graph_rows(self, graph_rows) -> None:
+        """Attach (row, previous_row) pairs to the items of their commits"""
+        # Resolve the rows through the oid->item map instead of rescanning
+        # every tree item.
+        for row, prev_row in graph_rows:
             item = self.oidmap.get(row.commit_oid)
             if item is not None:
                 item.setData(CommitTreeWidgetItem.SUMMARY, GRAPH_ROW_ROLE, row)
@@ -1899,7 +1899,6 @@ class CommitTreeWidget(standard.TreeWidget, ViewerMixin):
                         GRAPH_PREV_ROW_ROLE,
                         prev_row,
                     )
-            prev_row = row
 
     def create_patch(self):
         """Export a patch from the selected items"""
@@ -3000,8 +2999,17 @@ class GitDAG(standard.MainWindow):
         self._graph_build_id += 1
         self._commits_loaded = False
 
-    def add_commits(self, commits):
-        """Add new commits from the reader thread"""
+    def add_commits(self, chunk):
+        """Add new commits from the reader thread
+
+        chunk is a list of commits, or a (commits, graph_rows) pair from
+        ReaderThread, which builds the inline graph over all of them.
+        """
+        graph_rows = None
+        if isinstance(chunk, tuple):
+            commits, graph_rows = chunk
+        else:
+            commits = chunk
         self.commit_list.extend(commits)
         # Keep track of commits
         for commit_obj in commits:
@@ -3011,7 +3019,7 @@ class GitDAG(standard.MainWindow):
         # The treewidget is quick to update.  The graphview is slower when updating
         # incrementally so it is updated just once at thread_end() once all commits have
         # been gathered.
-        self.treewidget.add_commits(commits)
+        self.treewidget.add_commits(commits, graph_rows=graph_rows)
 
     def thread_begin(self):
         """The reader thread has begun"""
@@ -3194,6 +3202,27 @@ class GitDAG(standard.MainWindow):
             self.maxresults.setMinimumHeight(self.revtext.height())
 
 
+# Commits reach the commit list in chunks, so the GUI stays responsive.
+READER_CHUNK_SIZE = 2048
+
+
+def commit_graph(commits):
+    """Build the inline graph for commits, which are oldest-first"""
+    head_oid = None
+    for commit in commits:
+        if 'HEAD' in commit.tags:
+            head_oid = commit.oid
+    return build_graph(
+        [(commit.oid, [parent.oid for parent in commit.parents]) for commit in commits],
+        head_oid=head_oid,
+    )
+
+
+def graph_row_pairs(rows):
+    """Pair each graph row with the row above it (None for the top row)"""
+    return list(zip(rows, itertools.chain([None], rows)))
+
+
 class ReaderThread(QtCore.QThread):
     begin = Signal()
     add = Signal(object)
@@ -3220,17 +3249,29 @@ class ReaderThread(QtCore.QThread):
                 repo.reset()
                 return
             commits.append(commit)
-            if len(commits) >= 2048:
-                self.add.emit(commits)
-                commits = []
 
         stage, worktree = repo.get_worktree_commits()
         if stage:
             commits.append(stage)
         if worktree:
             commits.append(worktree)
-        if commits:
-            self.add.emit(commits)
+
+        # Build the inline graph over every commit here, off the GUI thread.
+        # Built per chunk, each chunk started with no lanes and cut every lane
+        # where it met the next one, every 2048 rows. git's newest-first
+        # output has already been read in full, so nothing waits on this.
+        rows = graph_row_pairs(commit_graph(commits).rows)
+        row_of = {pair[0].commit_oid: pair for pair in rows}
+        del rows
+        for start in range(0, len(commits), READER_CHUNK_SIZE):
+            if self.isInterruptionRequested():
+                repo.reset()
+                return
+            chunk = commits[start : start + READER_CHUNK_SIZE]
+            graph_rows = [
+                row_of[commit.oid] for commit in chunk if commit.oid in row_of
+            ]
+            self.add.emit((chunk, graph_rows))
 
         self.status.emit(repo.returncode == 0)
         self.end.emit()
