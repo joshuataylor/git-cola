@@ -677,7 +677,7 @@ def get_all_themes() -> list[Theme]:
     themes = [
         Theme(
             'default',
-            N_('Default'),
+            N_('Default (follows system)'),
             False,
             style_sheet=EStylesheet.DEFAULT,
             main_color=None,

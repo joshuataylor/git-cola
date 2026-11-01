@@ -142,7 +142,7 @@ class FollowSystemIconEngine(QtGui.QIconEngine):
 
 def icon_themes() -> tuple[tuple[str, str], tuple[str, str], tuple[str, str]]:
     return (
-        (N_('Default'), 'default'),
+        (N_('Default (follows system)'), 'default'),
         (N_('Dark Theme'), 'dark'),
         (N_('Light Theme'), 'light'),
     )
