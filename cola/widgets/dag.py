@@ -4664,6 +4664,31 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.zoom = zoom
         self.scale(zoom, zoom)
 
+    def zoom_at(self, zoom, pos):
+        """Scale by zoom, keeping the scene point under pos (viewport) in place"""
+        factor = (
+            self.transform()
+            .scale(zoom, zoom)
+            .mapRect(QtCore.QRectF(0.0, 0.0, 1.0, 1.0))
+            .width()
+        )
+        if factor < 0.014 or factor > 42.0:
+            return
+        before = self.mapToScene(pos)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.NoAnchor)
+        self.zoom = zoom
+        self.scale(zoom, zoom)
+        after = self.mapToScene(pos)
+        self.translate(after.x() - before.x(), after.y() - before.y())
+
+    def pan_by_pixels(self, dx, dy):
+        """Move the view by a distance in screen pixels, at any zoom"""
+        unit = QtCore.QRectF(0.0, 0.0, 1.0, 1.0)
+        factor = 1.0 / self.transform().mapRect(unit).width()
+        matrix = self.transform().translate(dx * factor, dy * factor)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.NoAnchor)
+        self.setTransform(matrix)
+
     def wheel_pan(self, event):
         """Handle mouse wheel panning."""
         unit = QtCore.QRectF(0.0, 0.0, 1.0, 1.0)
@@ -5072,6 +5097,20 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
                 if isinstance(item, Commit):
                     item.ensure_tooltip()
                     break
+        elif (
+            event.type() == QtCore.QEvent.NativeGesture
+            and event.gestureType() == Qt.ZoomNativeGesture
+        ):
+            # Pinch to zoom. QAbstractScrollArea doesn't pass native
+            # gestures on from the viewport, so they are handled here.
+            zoom = 1.0 + event.value()
+            if hasattr(event, 'position'):
+                pos = event.position()
+            else:  # Qt5
+                pos = event.localPos()
+            if zoom > 0:
+                self.zoom_at(zoom, pos.toPoint())
+            return True
         return super().viewportEvent(event)
 
     def contextMenuEvent(self, event):
@@ -5109,9 +5148,21 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
         self.viewport().update()
 
     def wheelEvent(self, event):
-        """Handle Qt mouse wheel events."""
+        """Pan with the wheel or a trackpad, zoom with Ctrl+scroll (Cmd on macOS)
+
+        A trackpad reports the distance in pixelDelta(). Its angleDelta() is
+        twice that on macOS, so panning by the angle moved the graph at twice
+        the speed of the fingers.
+        """
+        pixels = event.pixelDelta()
+        precise = not pixels.isNull()
         if event.modifiers() & Qt.ControlModifier:
+            # Momentum after the fingers lift would keep zooming.
+            if precise and event.phase() == Qt.ScrollMomentum:
+                return
             self.wheel_zoom(event)
+        elif precise:
+            self.pan_by_pixels(pixels.x(), pixels.y())
         else:
             self.wheel_pan(event)
 
