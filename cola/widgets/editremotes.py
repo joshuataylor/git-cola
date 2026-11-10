@@ -1,6 +1,5 @@
 import operator
 
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -381,13 +380,13 @@ def restore_focus(focus):
             focus.selectAll()
 
 
-class RemoteInfoThread(QtCore.QThread):
+class RemoteInfoThread(qtutils.Thread):
     """Gathers information about a remote for display in the info widget"""
 
     result = Signal(object)
 
     def __init__(self, context, parent):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.context = context
         self.remote = None
 

@@ -330,23 +330,30 @@ def is_popup_key(key, modifiers) -> bool:
     return key == Qt.Key_Space and modifiers == Qt.MetaModifier
 
 
-class GatherCompletionsThread(QtCore.QThread):
+class GatherCompletionsThread(qtutils.Thread):
     items_gathered = Signal(object)
 
     def __init__(self, model):
-        QtCore.QThread.__init__(self)
+        super().__init__()
         self.model = model
         self.case_sensitive = False
         self.running = False
 
-    def dispose(self):
+    def start(self, *args):
+        # Set here rather than in run(), which could otherwise clobber a stop()
+        # issued before the new thread got going.
+        self.running = True
+        super().start(*args)
+
+    def stop(self):
         self.running = False
-        utils.catch_runtime_error(self.wait)
+
+    def dispose(self):
+        utils.catch_runtime_error(self.halt)
 
     def run(self):
         text = None
         items = []
-        self.running = True
         # Loop when the matched text changes between the start and end time.
         # This happens when gather_matches() takes too long and the
         # model's match_text changes in-between.

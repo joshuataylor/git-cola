@@ -2,7 +2,6 @@
 import os
 from functools import partial
 
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -78,13 +77,13 @@ and the results.
     return text.text_dialog(context, qtutils.native_key_names(help_text), title)
 
 
-class FindFilesThread(QtCore.QThread):
+class FindFilesThread(qtutils.Thread):
     """Finds files asynchronously"""
 
     result = Signal(object)
 
     def __init__(self, context, parent):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.context = context
         self.query = None
 
