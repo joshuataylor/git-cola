@@ -751,6 +751,19 @@ class DraggableTreeWidget(TreeWidget):
         return self._mixin.dragEnterEvent(event)
 
 
+def halt_on_quit(thread):
+    """Stop and join a progress thread when the application quits
+
+    The thread's owner normally stops it when its task finishes, but that
+    callback is queued and never runs once the event loop has exited, e.g.
+    on Cmd-Q during a commit. Destroying the window tree with the thread
+    still running aborts the process.
+    """
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        app.aboutToQuit.connect(thread.halt)
+
+
 class ProgressDialog(QtWidgets.QProgressDialog):
     """Custom progress dialog
 
@@ -769,6 +782,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
         self.animation_thread = ProgressAnimationThread(label, self)
         self.animation_thread.updated.connect(self.set_text, type=Qt.QueuedConnection)
+        halt_on_quit(self.animation_thread)
 
         self.reset()
         self.setRange(0, 0)
@@ -800,8 +814,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
     def stop(self):
         """Stop the animation thread and restore the normal cursor"""
-        self.animation_thread.stop()
-        self.animation_thread.wait()
+        self.animation_thread.halt()
         QtWidgets.QApplication.restoreOverrideCursor()
         self.hide()
 
@@ -835,13 +848,24 @@ class ProgressAnimationThread(QtCore.QThread):
         self.idx = (self.idx + 1) % len(self.symbols)
         return self.txt + self.symbols[self.idx]
 
+    def start(self, *args):
+        """Start the animation thread"""
+        # Set here rather than in run(), which could otherwise clobber a stop()
+        # issued before the new thread got going and loop forever.
+        self.running = True
+        super().start(*args)
+
     def stop(self):
         """Stop the animation thread"""
         self.running = False
 
+    def halt(self):
+        """Stop the animation thread and wait for it to finish"""
+        self.stop()
+        self.wait()
+
     def run(self):
         """Emit ticks until stopped"""
-        self.running = True
         while self.running:
             self.updated.emit(self.tick())
             time.sleep(self.sleep_time)
@@ -882,11 +906,23 @@ class ProgressTickThread(QtCore.QThread):
             self.step = 1
         return self.value
 
+    def start(self, *args):
+        """Start the tick thread"""
+        # Set here rather than in run(), which could otherwise clobber a stop()
+        # issued before the new thread got going and loop forever.
+        self.running = True
+        super().start(*args)
+
     def stop(self):
         """Stop the tick thread and reset to the initial state"""
         self.running = False
         self.value = 0
         self.step = 1
+
+    def halt(self):
+        """Stop the tick thread and wait for it to finish"""
+        self.stop()
+        self.wait()
 
     def run(self):
         """Start the tick thread
@@ -896,7 +932,6 @@ class ProgressTickThread(QtCore.QThread):
         """
         initial_time = time.time()
         active = False
-        self.running = True
         self.value = 0
         self.step = 1
         while self.running:
@@ -1287,6 +1322,7 @@ class ProgressBar(QtWidgets.QProgressBar):
         self.progress_thread = ProgressTickThread(self, maximum)
         self.progress_thread.updated.connect(self.setValue, type=Qt.QueuedConnection)
         self.progress_thread.activated.connect(self.activate, type=Qt.QueuedConnection)
+        halt_on_quit(self.progress_thread)
         self._widgets_to_hide = hide
         self._widgets_to_disable = disable
 
@@ -1307,8 +1343,7 @@ class ProgressBar(QtWidgets.QProgressBar):
 
     def stop(self):
         """Stop the progress tick thread, re-enable and display widgets"""
-        self.progress_thread.stop()
-        self.progress_thread.wait()
+        self.progress_thread.halt()
 
         for widget in self._widgets_to_disable:
             widget.setEnabled(True)
