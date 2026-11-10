@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from cola import qtutils
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
@@ -279,3 +280,33 @@ def test_selected_values_match_a_scan_of_every_child(qapp):
             assert qtutils.get_selected_items(tree, idx) == (
                 qtutils.tree_selection_items(top)
             )
+
+
+class _InterruptibleThread(qtutils.Thread):
+    """Runs until an interruption is requested"""
+
+    def run(self):
+        while not self.isInterruptionRequested():
+            self.msleep(5)
+
+
+def test_thread_halts_when_the_app_quits(qapp):
+    """aboutToQuit stops and joins a running qtutils.Thread"""
+    thread = _InterruptibleThread()
+    thread.start()
+    try:
+        assert thread.isRunning()
+        qapp.aboutToQuit.emit()
+        assert thread.isFinished()
+    finally:
+        thread.halt()
+
+
+def test_thread_deleted_before_quit_is_disconnected(qapp):
+    """A thread deleted with its parent no longer receives aboutToQuit"""
+    parent = QtCore.QObject()
+    _InterruptibleThread(parent)
+    del parent
+    # Calling halt() on the deleted thread would raise inside the slot and
+    # abort the process.
+    qapp.aboutToQuit.emit()

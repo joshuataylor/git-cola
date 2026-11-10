@@ -1590,6 +1590,36 @@ class SimpleTask(Task):
         return self.func(*self.args, **self.kwargs)
 
 
+class Thread(QtCore.QThread):
+    """A QThread that is stopped and joined when the application quits
+
+    Destroying a QThread while run() is still going aborts the process
+    ("QThread: Destroyed while thread is still running"). Once the event loop
+    exits, the queued callbacks that would have stopped a thread never run,
+    and the teardown that follows deletes the windows and every thread they
+    own. Joining on aboutToQuit, while everything still exists, avoids that.
+
+    Subclasses whose run() can return early override stop(). The default only
+    requests an interruption, so halt() waits for run() to finish.
+    """
+
+    def __init__(self, parent: QtCore.QObject | None = None) -> None:
+        super().__init__(parent)
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            # A bound method of a QObject is disconnected when it is deleted.
+            app.aboutToQuit.connect(self.halt)
+
+    def stop(self) -> None:
+        """Ask run() to return early"""
+        self.requestInterruption()
+
+    def halt(self) -> None:
+        """Stop the thread and wait for it to finish"""
+        self.stop()
+        self.wait()
+
+
 class RunTask(QtCore.QObject):
     """Runs QRunnable instances and transfers control when they finish"""
 
