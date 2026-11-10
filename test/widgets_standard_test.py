@@ -1,6 +1,26 @@
 """Tests for cola.widgets.standard helpers."""
+import os
+import subprocess
+import sys
+
+import pytest
+
+from cola.widgets import standard
 from cola.widgets.standard import _strip_maximized_geometry_flag
 from qtpy import QtCore
+from qtpy import QtWidgets
+
+
+@pytest.fixture(scope='module')
+def qapp():
+    """Provide a QApplication for the widget tests."""
+    instance = QtWidgets.QApplication.instance()
+    if instance is None:
+        instance = QtWidgets.QApplication(
+            sys.argv[:1] if sys.argv else ['git-cola-test']
+        )
+    yield instance
+
 
 # Real saveGeometry() blob captured from a maximised git-cola main window on
 # macOS 15 (recorded from ~/.config/git-cola/settings). The byte at offset 44
@@ -83,3 +103,83 @@ def test_strip_treats_any_non_zero_byte_as_maximized():
 
     assert was_maximized is True
     assert _maximized_byte(blob_out) == 0
+
+
+def test_progress_bar_stop_straight_after_start_joins_the_thread(qapp):
+    """A stop() that beats the new thread into run() still ends the thread"""
+    parent = QtWidgets.QWidget()
+    bar = standard.progress_bar(parent)
+    thread = bar.progress_thread
+    try:
+        thread.start()
+        thread.stop()
+        assert thread.wait(5000)
+    finally:
+        thread.halt()
+
+
+def test_progress_bar_halts_its_thread_when_the_app_quits(qapp):
+    """aboutToQuit joins the tick thread while its widgets still exist"""
+    parent = QtWidgets.QWidget()
+    bar = standard.progress_bar(parent)
+    bar.start()
+    try:
+        assert bar.progress_thread.isRunning()
+        qapp.aboutToQuit.emit()
+        assert bar.progress_thread.isFinished()
+    finally:
+        bar.progress_thread.halt()
+        QtWidgets.QApplication.restoreOverrideCursor()
+
+
+def test_progress_dialog_halts_its_thread_when_the_app_quits(qapp):
+    """aboutToQuit joins the label animation thread"""
+    dialog = standard.ProgressDialog('title', 'label', None)
+    dialog.start()
+    try:
+        assert dialog.animation_thread.isRunning()
+        qapp.aboutToQuit.emit()
+        assert dialog.animation_thread.isFinished()
+    finally:
+        dialog.stop()
+
+
+_QUIT_WITH_RUNNING_PROGRESS_BAR = """
+import sys
+
+from qtpy import QtCore
+from qtpy import QtWidgets
+
+from cola.widgets import standard
+
+app = QtWidgets.QApplication(sys.argv[:1])
+window = QtWidgets.QMainWindow()
+dock = QtWidgets.QDockWidget()
+panel = QtWidgets.QWidget()
+bar = standard.progress_bar(panel)
+dock.setWidget(panel)
+window.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
+bar.start()
+QtCore.QTimer.singleShot(0, app.quit)
+app.exec_()
+del window
+"""
+
+
+def test_quitting_with_a_running_progress_bar_does_not_abort():
+    """Quitting mid-commit destroyed the commit editor's running tick thread
+
+    Qt aborts the process ("QThread: Destroyed while thread is still
+    running"), so this runs in a child process.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, QT_QPA_PLATFORM='offscreen', PYTHONPATH=root)
+    result = subprocess.run(
+        [sys.executable, '-c', _QUIT_WITH_RUNNING_PROGRESS_BAR],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
