@@ -1,4 +1,3 @@
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -34,12 +33,12 @@ class CreateOpts:
         self.branch = ''
 
 
-class CreateThread(QtCore.QThread):
+class CreateThread(qtutils.Thread):
     command = Signal(object, object, object)
     result = Signal(object)
 
     def __init__(self, opts, parent):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.opts = opts
 
     def run(self):

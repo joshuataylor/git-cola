@@ -1,4 +1,3 @@
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -22,11 +21,11 @@ def browse_recent_files(context):
     return dialog
 
 
-class UpdateFileListThread(QtCore.QThread):
+class UpdateFileListThread(qtutils.Thread):
     result = Signal(object)
 
     def __init__(self, context, count):
-        QtCore.QThread.__init__(self)
+        super().__init__()
         self.context = context
         self.count = count
 
