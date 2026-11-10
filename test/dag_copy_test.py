@@ -53,9 +53,10 @@ def test_copy_commit_joins_selected_oids_ordered_by_generation():
 
 def test_copy_commit_short_abbreviates_each_oid():
     viewer = _Viewer(_items(('a' * 40, 1), ('b' * 40, 2)))
-    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-        with patch.object(dag.prefs, 'abbrev', return_value=7):
-            viewer.copy_to_clipboard_short()
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard, patch.object(
+        dag.prefs, 'abbrev', return_value=7
+    ):
+        viewer.copy_to_clipboard_short()
     set_clipboard.assert_called_once_with('aaaaaaa\nbbbbbbb')
 
 
@@ -122,9 +123,10 @@ def _fake_log(_context, *args, **kwargs):
 
 def test_copy_commit_message_keeps_wrapping():
     viewer = _Viewer(_items(('aaa', 1)))
-    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
-        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-            viewer.copy_message_to_clipboard()
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log), patch.object(
+        dag.qtutils, 'set_clipboard'
+    ) as set_clipboard:
+        viewer.copy_message_to_clipboard()
     set_clipboard.assert_called_once_with(
         'subject one\n\nbody that\nwraps.\n\nSigned-off-by: X <x@y>'
     )
@@ -132,9 +134,10 @@ def test_copy_commit_message_keeps_wrapping():
 
 def test_copy_commit_message_unwrapped_joins_body_only():
     viewer = _Viewer(_items(('aaa', 1)))
-    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
-        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-            viewer.copy_message_unwrapped_to_clipboard()
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log), patch.object(
+        dag.qtutils, 'set_clipboard'
+    ) as set_clipboard:
+        viewer.copy_message_unwrapped_to_clipboard()
     set_clipboard.assert_called_once_with(
         'subject one\n\nbody that wraps.\n\nSigned-off-by: X <x@y>'
     )
@@ -142,9 +145,10 @@ def test_copy_commit_message_unwrapped_joins_body_only():
 
 def test_copy_commit_message_joins_multiple_selection_in_generation_order():
     viewer = _Viewer(_items(('bbb', 2), ('aaa', 1)))
-    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log):
-        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-            viewer.copy_message_unwrapped_to_clipboard()
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log), patch.object(
+        dag.qtutils, 'set_clipboard'
+    ) as set_clipboard:
+        viewer.copy_message_unwrapped_to_clipboard()
     set_clipboard.assert_called_once_with(
         'subject one\n\nbody that wraps.\n\nSigned-off-by: X <x@y>\n\nsubject two'
     )
@@ -152,10 +156,11 @@ def test_copy_commit_message_joins_multiple_selection_in_generation_order():
 
 def test_copy_commit_message_skips_pseudo_commits_and_empty_selection():
     viewer = _Viewer(_items((dag_model.WORKTREE, 2), (dag_model.STAGE, 1)))
-    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log) as log:
-        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-            viewer.copy_message_to_clipboard()
-            viewer.copy_message_unwrapped_to_clipboard()
+    with patch.object(dag.gitcmds, 'log', side_effect=_fake_log) as log, patch.object(
+        dag.qtutils, 'set_clipboard'
+    ) as set_clipboard:
+        viewer.copy_message_to_clipboard()
+        viewer.copy_message_unwrapped_to_clipboard()
     log.assert_not_called()
     set_clipboard.assert_not_called()
 
@@ -184,9 +189,10 @@ def test_copy_commit_title_skips_pseudo_commits():
 
 def test_copy_oneline_joins_short_oid_and_title():
     viewer = _Viewer(_items(('a' * 40, 1), ('b' * 40, 2)))
-    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-        with patch.object(dag.prefs, 'abbrev', return_value=7):
-            viewer.copy_oneline_to_clipboard()
+    with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard, patch.object(
+        dag.prefs, 'abbrev', return_value=7
+    ):
+        viewer.copy_oneline_to_clipboard()
     expect = 'aaaaaaa title ' + 'a' * 40 + '\nbbbbbbb title ' + 'b' * 40
     set_clipboard.assert_called_once_with(expect)
 
@@ -197,9 +203,10 @@ def _fake_web_url(_context, oid):
 
 def test_copy_link_copies_one_url_per_commit():
     viewer = _Viewer(_items(('aaa', 1), ('bbb', 2)))
-    with patch.object(dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url):
-        with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-            viewer.copy_link_to_clipboard()
+    with patch.object(
+        dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url
+    ), patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        viewer.copy_link_to_clipboard()
     set_clipboard.assert_called_once_with(
         'https://example.com/org/repo/commit/aaa\n'
         'https://example.com/org/repo/commit/bbb'
@@ -208,10 +215,12 @@ def test_copy_link_copies_one_url_per_commit():
 
 def test_copy_markdown_link_formats_abbrev_url_and_title():
     viewer = _Viewer(_items(('a' * 40, 1)))
-    with patch.object(dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url):
-        with patch.object(dag.prefs, 'abbrev', return_value=7):
-            with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-                viewer.copy_markdown_link_to_clipboard()
+    with patch.object(
+        dag.gitcmds, 'commit_web_url', side_effect=_fake_web_url
+    ), patch.object(dag.prefs, 'abbrev', return_value=7), patch.object(
+        dag.qtutils, 'set_clipboard'
+    ) as set_clipboard:
+        viewer.copy_markdown_link_to_clipboard()
     set_clipboard.assert_called_once_with(
         '[aaaaaaa](https://example.com/org/repo/commit/'
         + 'a' * 40
@@ -222,11 +231,11 @@ def test_copy_markdown_link_formats_abbrev_url_and_title():
 
 def test_copy_link_without_a_web_remote_is_a_no_op():
     viewer = _Viewer(_items(('aaa', 1)))
-    with patch.object(dag.gitcmds, 'commit_web_url', return_value=''):
-        with patch.object(dag.prefs, 'abbrev', return_value=7):
-            with patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
-                viewer.copy_link_to_clipboard()
-                viewer.copy_markdown_link_to_clipboard()
+    with patch.object(dag.gitcmds, 'commit_web_url', return_value=''), patch.object(
+        dag.prefs, 'abbrev', return_value=7
+    ), patch.object(dag.qtutils, 'set_clipboard') as set_clipboard:
+        viewer.copy_link_to_clipboard()
+        viewer.copy_markdown_link_to_clipboard()
     set_clipboard.assert_not_called()
 
 

@@ -147,5 +147,5 @@ def _handle_key_down(event):
             return event
         window.sendEvent_(event)
         return None
-    except Exception:  # never break keyboard input
+    except Exception:  # noqa: BLE001 (never break keyboard input)
         return event

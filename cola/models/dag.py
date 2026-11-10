@@ -2,8 +2,8 @@ from __future__ import annotations
 import datetime
 import json
 import subprocess
+from collections.abc import Callable
 from collections.abc import Iterator
-from typing import Callable
 
 from .. import core
 from .. import utils
@@ -128,12 +128,12 @@ class Commit:
         'branches',
         'children',
         'column',
+        'commitdate',
+        'committer',
+        'committer_email',
+        'committer_timestamp',
         'context',
         'email',
-        'committer',
-        'commitdate',
-        'committer_timestamp',
-        'committer_email',
         'generation',
         'oid',
         'parents',

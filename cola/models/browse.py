@@ -75,7 +75,7 @@ def parse_metadata_log(
             continue
         if meta is None:
             continue
-        path = token[1:] if token.startswith('\n') else token
+        path = token.removeprefix('\n')
         if path not in metadata:
             metadata[path] = meta
         # Credit ancestor directories: crediting a directory also credited
