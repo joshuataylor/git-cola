@@ -1,4 +1,3 @@
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -57,13 +56,13 @@ def goto_grep(context, line):
         )
 
 
-class GrepThread(QtCore.QThread):
+class GrepThread(qtutils.Thread):
     """Gather `git grep` results in a background thread"""
 
     result = Signal(object, object, object)
 
     def __init__(self, context, parent):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.context = context
         self.query = None
         self.shell = False
