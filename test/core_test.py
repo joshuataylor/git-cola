@@ -72,3 +72,35 @@ def test_setenv():
     core.unsetenv(ops, key)
     assert key not in os.environ
     assert not os.getenv(key)
+
+
+def test_app_bundle_contents(monkeypatch):
+    monkeypatch.setattr(core, 'IS_DARWIN', True)
+    python = '/Applications/git-cola.app/Contents/Resources/bin/python'
+    assert core.app_bundle_contents(python) == '/Applications/git-cola.app/Contents'
+    assert core.app_bundle_contents('/usr/local/bin/python3') is None
+    monkeypatch.setattr(core, 'IS_DARWIN', False)
+    assert core.app_bundle_contents(python) is None
+
+
+def test_cola_argv_starts_new_windows_through_the_bundle(tmp_path, monkeypatch):
+    """From git-cola.app another window goes through the bundle's launcher"""
+    contents = tmp_path / 'git-cola.app' / 'Contents'
+    (contents / 'MacOS').mkdir(parents=True)
+    launcher = contents / 'MacOS' / 'git-cola'
+    launcher.write_text('#!/bin/sh\n')
+    launcher.chmod(0o755)
+    monkeypatch.setattr(core, 'IS_DARWIN', True)
+    monkeypatch.setattr(
+        core.sys, 'executable', str(contents / 'Resources' / 'bin' / 'python')
+    )
+    assert core.cola_argv('--repo', '/src') == [str(launcher), '--repo', '/src']
+
+    monkeypatch.setattr(core.sys, 'executable', '/usr/bin/python3')
+    monkeypatch.setattr(core.sys, 'argv', ['/usr/local/bin/git-cola'])
+    assert core.cola_argv('--repo', '/src') == [
+        '/usr/bin/python3',
+        '/usr/local/bin/git-cola',
+        '--repo',
+        '/src',
+    ]

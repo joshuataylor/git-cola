@@ -2677,10 +2677,7 @@ class OpenNewRepo(Command):
 
     def do(self) -> bool:
         self.model.set_directory(self.repo_path)
-        core.fork(
-            [sys.executable, sys.argv[0], '--repo', self.repo_path],
-            ops=self.context.ops,
-        )
+        core.fork(core.cola_argv('--repo', self.repo_path), ops=self.context.ops)
         return True
 
 
@@ -2804,10 +2801,8 @@ class Clone(Command):
         self.out = out
         self.err = err
         if status == 0 and self.spawn:
-            executable = sys.executable
             core.fork(
-                [executable, sys.argv[0], '--repo', self.new_directory],
-                ops=self.context.ops,
+                core.cola_argv('--repo', self.new_directory), ops=self.context.ops
             )
         return status == 0
 

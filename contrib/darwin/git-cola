@@ -23,4 +23,22 @@ done
 PATH="${resources}/bin:${PATH}"
 export PATH
 
-exec python "${contents}/Resources/bin/git-cola" --prompt
+# Started from Finder or the Dock there are no arguments: ask for a
+# repository. Another git-cola started from the app passes --repo.
+if test $# -eq 0
+then
+	set -- --prompt
+fi
+
+# Run the bundle's own copy of the interpreter. macOS identifies a process
+# by the bundle its executable is in, and the venv's python is a symlink to
+# an interpreter outside the app, so the app had no bundle id: no Git Cola
+# name or icon in Cmd-Tab, and its windows weren't the app's.
+# __PYVENV_LAUNCHER__ tells that interpreter to use the bundle's venv.
+if test -x "${macos}/python"
+then
+	__PYVENV_LAUNCHER__="${resources}/bin/python"
+	export __PYVENV_LAUNCHER__
+	exec "${macos}/python" "${resources}/bin/git-cola" "$@"
+fi
+exec python "${resources}/bin/git-cola" "$@"
