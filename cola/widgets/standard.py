@@ -751,19 +751,6 @@ class DraggableTreeWidget(TreeWidget):
         return self._mixin.dragEnterEvent(event)
 
 
-def halt_on_quit(thread):
-    """Stop and join a progress thread when the application quits
-
-    The thread's owner normally stops it when its task finishes, but that
-    callback is queued and never runs once the event loop has exited, e.g.
-    on Cmd-Q during a commit. Destroying the window tree with the thread
-    still running aborts the process.
-    """
-    app = QtWidgets.QApplication.instance()
-    if app is not None:
-        app.aboutToQuit.connect(thread.halt)
-
-
 class ProgressDialog(QtWidgets.QProgressDialog):
     """Custom progress dialog
 
@@ -782,7 +769,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
         self.animation_thread = ProgressAnimationThread(label, self)
         self.animation_thread.updated.connect(self.set_text, type=Qt.QueuedConnection)
-        halt_on_quit(self.animation_thread)
 
         self.reset()
         self.setRange(0, 0)
@@ -819,14 +805,14 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.hide()
 
 
-class ProgressAnimationThread(QtCore.QThread):
+class ProgressAnimationThread(qtutils.Thread):
     """Emits a pseudo-animated text stream for progress bars"""
 
     # The updated signal is emitted on each tick.
     updated = Signal(object)
 
     def __init__(self, txt, parent, sleep_time=0.1):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.running = False
         self.txt = txt
         self.sleep_time = sleep_time
@@ -859,11 +845,6 @@ class ProgressAnimationThread(QtCore.QThread):
         """Stop the animation thread"""
         self.running = False
 
-    def halt(self):
-        """Stop the animation thread and wait for it to finish"""
-        self.stop()
-        self.wait()
-
     def run(self):
         """Emit ticks until stopped"""
         while self.running:
@@ -871,7 +852,7 @@ class ProgressAnimationThread(QtCore.QThread):
             time.sleep(self.sleep_time)
 
 
-class ProgressTickThread(QtCore.QThread):
+class ProgressTickThread(qtutils.Thread):
     """Emits an int stream for progress bars"""
 
     # The updated signal emits progress tick values.
@@ -886,7 +867,7 @@ class ProgressTickThread(QtCore.QThread):
         start_time=1.0,
         sleep_time=0.05,
     ):
-        QtCore.QThread.__init__(self, parent)
+        super().__init__(parent)
         self.running = False
         self.sleep_time = sleep_time
         self.maximum = maximum
@@ -918,11 +899,6 @@ class ProgressTickThread(QtCore.QThread):
         self.running = False
         self.value = 0
         self.step = 1
-
-    def halt(self):
-        """Stop the tick thread and wait for it to finish"""
-        self.stop()
-        self.wait()
 
     def run(self):
         """Start the tick thread
@@ -1322,7 +1298,6 @@ class ProgressBar(QtWidgets.QProgressBar):
         self.progress_thread = ProgressTickThread(self, maximum)
         self.progress_thread.updated.connect(self.setValue, type=Qt.QueuedConnection)
         self.progress_thread.activated.connect(self.activate, type=Qt.QueuedConnection)
-        halt_on_quit(self.progress_thread)
         self._widgets_to_hide = hide
         self._widgets_to_disable = disable
 
