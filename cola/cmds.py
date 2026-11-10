@@ -3230,7 +3230,7 @@ def _read_status(model, query):
     """Read the status on a worker thread, returning any exception"""
     try:
         return model.read_status(query)
-    except Exception as exc:  # Reported on the GUI thread.
+    except Exception as exc:  # noqa: BLE001 (reported on the GUI thread)
         return exc
 
 

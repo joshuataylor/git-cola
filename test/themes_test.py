@@ -93,9 +93,9 @@ def test_platform_theme_is_applied_by_name(monkeypatch):
 
 def test_default_themes_say_they_follow_the_system():
     """Only the defaults track Light/Dark, so their labels say so"""
-    titles = dict((name, title) for title, name in themes.options())
+    titles = {name: title for title, name in themes.options()}
     assert titles['default'] == 'Default (follows system)'
-    icon_titles = dict((name, title) for title, name in icons.icon_themes())
+    icon_titles = {name: title for title, name in icons.icon_themes()}
     assert icon_titles['default'] == 'Default (follows system)'
 
 

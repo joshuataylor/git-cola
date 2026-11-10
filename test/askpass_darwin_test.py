@@ -27,7 +27,11 @@ def _run(tmp_path, prompt, reply='secret', status=0):
     stub.chmod(0o755)
     env = {'PATH': f'{tmp_path}:/usr/bin:/bin', 'MACOS_ASKPASS_TITLE': 'Git Cola'}
     result = subprocess.run(
-        ['/bin/sh', SCRIPT, prompt], env=env, capture_output=True, text=True
+        ['/bin/sh', SCRIPT, prompt],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     args = record.read_text().splitlines() if record.exists() else []
     return result, args, (tmp_path / 'script').read_text()

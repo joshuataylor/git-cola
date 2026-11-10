@@ -176,7 +176,7 @@ def test_theme_change_applies_without_a_restart(qapp, monkeypatch):
 
 
 def test_other_config_changes_leave_the_theme_alone(qapp, monkeypatch):
-    cola, calls = _live_theme_app(monkeypatch, {'cola.theme': 'default'})
+    cola, _calls = _live_theme_app(monkeypatch, {'cola.theme': 'default'})
     cola._install_style = MagicMock()
     cola._config_changed('cola.tabwidth', 4)
     cola._install_style.assert_not_called()

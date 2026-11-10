@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 from functools import partial
+from typing import ClassVar
 
 from qtpy import QtCore
 from qtpy import QtGui
@@ -3905,17 +3906,17 @@ class Edge:
     """
 
     __slots__ = (
-        'source',
-        'dest',
-        'commit',
-        'group',
-        'pen',
-        'color_index',
-        'left',
-        'top',
-        'right',
         'bottom',
+        'color_index',
+        'commit',
+        'dest',
+        'group',
+        'left',
         'path',
+        'pen',
+        'right',
+        'source',
+        'top',
     )
 
     def __init__(self, group, source, dest, source_xy=None, dest_xy=None):
@@ -4084,7 +4085,7 @@ class EdgeColor:
     colors = _edge_base_colors()
     # Edges share one pen per color, so a large graph builds a few pens
     # rather than one per edge.
-    _pens = {}
+    _pens: ClassVar[dict] = {}
 
     @classmethod
     def update_colors(cls, dark):
@@ -5061,12 +5062,13 @@ class GraphView(QtWidgets.QGraphicsView, ViewerMixin):
             can_overlap = range(self.max_column, column, -1)
         # Only the few tagged columns in a row are checked, rather than every
         # column that could overlap, which is slow on a wide graph.
-        for cell_row in itertools.count(cell_row):
-            tagged = self.tagged_rows.get(cell_row)
+        for free_row in itertools.count(cell_row):
+            tagged = self.tagged_rows.get(free_row)
             if not tagged or not any(value in can_overlap for value in tagged):
                 # No overlapping was found.
                 break
             # Overlapping. Try next row.
+        cell_row = free_row
 
         if tags:
             self.tagged_rows.setdefault(cell_row, set()).add(column)

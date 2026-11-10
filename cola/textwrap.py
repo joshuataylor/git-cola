@@ -283,9 +283,7 @@ def is_prose_line(line: str) -> bool:
         return False
     if SPECIAL_TAG_RGX.match(line):
         return False
-    if STRUCTURED_LINE_RGX.match(line):
-        return False
-    return True
+    return not STRUCTURED_LINE_RGX.match(line)
 
 
 def unwrap(text: str) -> str:
