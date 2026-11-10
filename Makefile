@@ -166,6 +166,9 @@ ifneq ($(cola_full_version),)
 endif
 	sed -i -e s/0.0.0/$(cola_version)/ $(cola_app)/Contents/Info.plist
 	$(CP) contrib/darwin/git-cola $(cola_app)/Contents/MacOS
+# A copy of the interpreter inside Contents/MacOS gives the running app
+# the bundle's identity (see contrib/darwin/git-cola).
+	$(CP) "$$($(cola_app_resources)/bin/python -c 'import os, sys; print(os.path.realpath(sys.executable))')" $(cola_app)/Contents/MacOS/python
 	$(CP) contrib/darwin/git-cola.icns $(cola_app)/Contents/Resources
 	$(MAKE) PIP=$(cola_app_resources)/bin/pip \
 		prefix=$(cola_app_resources) install

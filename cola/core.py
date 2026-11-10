@@ -48,6 +48,39 @@ INT32_MAX = (2**31) - 1
 
 IS_LINUX = sys.platform.startswith('linux')
 IS_DARWIN = sys.platform == 'darwin'
+
+
+def app_bundle_contents(executable: str | None = None) -> str | None:
+    """The Contents directory of the macOS app bundle cola runs from, if any
+
+    git-cola.app runs Contents/MacOS/python as the bundle's venv, so
+    sys.executable is Contents/Resources/bin/python.
+    """
+    if not IS_DARWIN:
+        return None
+    if executable is None:
+        executable = sys.executable
+    marker = '.app/Contents/'
+    index = executable.find(marker)
+    if index < 0:
+        return None
+    return executable[: index + len(marker) - 1]
+
+
+def cola_argv(*args: str) -> list[str]:
+    """The command that starts another git-cola with args
+
+    From the app bundle it goes through the bundle's launcher, so the new
+    window belongs to the app instead of being a bare Python process.
+    """
+    contents = app_bundle_contents()
+    if contents:
+        launcher = os.path.join(contents, 'MacOS', 'git-cola')
+        if os.access(launcher, os.X_OK):
+            return [launcher, *args]
+    return [sys.executable, sys.argv[0], *args]
+
+
 IS_WIN32 = sys.platform in {'win32', 'cygwin'}
 
 # Some files are not in UTF-8; some other aren't in any codification.

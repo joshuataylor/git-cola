@@ -439,3 +439,76 @@ def test_darwin_plist_names_its_document_type_and_has_no_nib():
     plist = _load_darwin_plist()
     assert plist['CFBundleDocumentTypes'][0]['CFBundleTypeName'] == 'Folder'
     assert 'NSMainNibFile' not in plist
+
+
+def _bundle_with_launcher(tmp_path, with_python):
+    """A fake git-cola.app whose interpreters print their arguments"""
+    launcher = os.path.join(
+        os.path.dirname(__file__), '..', 'contrib', 'darwin', 'git-cola'
+    )
+    macos = tmp_path / 'git-cola.app' / 'Contents' / 'MacOS'
+    bindir = tmp_path / 'git-cola.app' / 'Contents' / 'Resources' / 'bin'
+    macos.mkdir(parents=True)
+    bindir.mkdir(parents=True)
+    shutil.copy(launcher, macos / 'git-cola')
+    script = '#!/bin/sh\nprintf "%s|%s|%s" "$0" "$__PYVENV_LAUNCHER__" "$*"\n'
+    venv_python = bindir / 'python'
+    venv_python.write_text(script)
+    venv_python.chmod(0o755)
+    if with_python:
+        python = macos / 'python'
+        python.write_text(script)
+        python.chmod(0o755)
+    return macos, bindir
+
+
+def _run_launcher(macos, *args):
+    result = subprocess.run(
+        ['/bin/sh', str(macos / 'git-cola'), *args],
+        env={'PATH': '/usr/bin:/bin'},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.split('|')
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX shell launcher')
+def test_darwin_launcher_runs_the_interpreter_inside_the_bundle(tmp_path):
+    """macOS gives a process the identity of the bundle its executable is in"""
+    macos, bindir = _bundle_with_launcher(tmp_path, with_python=True)
+    executable, venv, args = _run_launcher(macos)
+    assert executable == str(macos / 'python')
+    assert venv == str(bindir / 'python')
+    assert args == f'{bindir / "git-cola"} --prompt'
+
+    # Another git-cola started from the app passes its own arguments.
+    executable, venv, args = _run_launcher(macos, '--repo', '/src/repo')
+    assert args == f'{bindir / "git-cola"} --repo /src/repo'
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX shell launcher')
+def test_darwin_launcher_falls_back_to_the_venv_python(tmp_path):
+    """A bundle built before the interpreter copy still starts"""
+    macos, bindir = _bundle_with_launcher(tmp_path, with_python=False)
+    executable, venv, args = _run_launcher(macos)
+    assert executable.endswith('python')
+    assert venv == ''
+    assert args == f'{bindir / "git-cola"} --prompt'
+
+
+def test_set_process_title_leaves_the_app_bundle_alone(monkeypatch):
+    """setproctitle would replace the bundle's name in Cmd-Tab and the Dock"""
+    calls = []
+    fake = types.ModuleType('setproctitle')
+    fake.setproctitle = calls.append
+    monkeypatch.setitem(sys.modules, 'setproctitle', fake)
+    monkeypatch.setattr(core, 'IS_DARWIN', True)
+    monkeypatch.setattr(
+        sys, 'executable', '/Applications/git-cola.app/Contents/Resources/bin/python'
+    )
+    monkeypatch.setattr(sys, 'argv', ['/usr/local/bin/git-cola'])
+
+    app.set_process_title()
+
+    assert calls == []

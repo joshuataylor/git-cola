@@ -608,3 +608,15 @@ def test_run_stamped_orders_commands_by_request_not_by_completion():
     second()
     first()
     assert shown == ['second']
+
+
+def test_open_new_repo_starts_git_cola_through_cola_argv(app_context, monkeypatch):
+    """New windows from git-cola.app go through the bundle's launcher"""
+    forked = []
+    monkeypatch.setattr(cmds.core, 'cola_argv', lambda *args: ['launcher', *args])
+    monkeypatch.setattr(cmds.core, 'fork', lambda argv, ops=None: forked.append(argv))
+    app_context.model.set_directory = lambda path: None
+
+    cmds.OpenNewRepo(app_context, '/src/repo').do()
+
+    assert forked == [['launcher', '--repo', '/src/repo']]

@@ -1003,6 +1003,11 @@ def set_process_title() -> None:
     registered with LaunchServices makes macOS reclassify the app as a
     UIElement, which removes it from the Cmd-Tab application switcher.
     """
+    if core.app_bundle_contents():
+        # The bundle names the app. setproctitle also sets the LaunchServices
+        # display name, which Cmd-Tab and the Dock show, so it replaced
+        # "git-cola" there with the path of the script.
+        return
     try:
         import setproctitle
     except ImportError:
