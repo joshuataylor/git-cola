@@ -310,9 +310,10 @@ def test_oid_diff_range_uses_external_diff_command(app_context):
         captured['opts'] = opts
         return (0, '\x1b[31mext diff\x1b[0m', '')
 
-    with patch('cola.gitcmds.prefs.dag_diff_command', return_value='difft'):
-        with patch.object(app_context.git, 'diff', side_effect=fake_diff):
-            out = gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
+    with patch(
+        'cola.gitcmds.prefs.dag_diff_command', return_value='difft'
+    ), patch.object(app_context.git, 'diff', side_effect=fake_diff):
+        out = gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
 
     assert out == '\x1b[31mext diff\x1b[0m'
     opts = captured['opts']
@@ -335,9 +336,10 @@ def test_oid_diff_range_uses_git_diff_by_default(app_context):
         captured['opts'] = opts
         return (0, 'diff --git a/f b/f\n', '')
 
-    with patch('cola.gitcmds.prefs.dag_diff_command', return_value=''):
-        with patch.object(app_context.git, 'diff', side_effect=fake_diff):
-            gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
+    with patch('cola.gitcmds.prefs.dag_diff_command', return_value=''), patch.object(
+        app_context.git, 'diff', side_effect=fake_diff
+    ):
+        gitcmds.oid_diff_range(app_context, 'aaaa', 'bbbb')
 
     assert 'ext_diff' not in captured['opts']
     assert '_add_env' not in captured['opts']

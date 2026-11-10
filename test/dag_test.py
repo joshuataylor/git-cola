@@ -505,7 +505,9 @@ def test_toggling_a_column_fills_in_its_text(qapp, app_context):
     tree.add_commits([_commit_for_columns(app_context)])
     item = tree.topLevelItem(0)
 
-    oid_idx = [idx for idx, column in enumerate(tree.columns) if column.key == 'oid'][0]
+    oid_idx = next(
+        idx for idx, column in enumerate(tree.columns) if column.key == 'oid'
+    )
     assert tree.isColumnHidden(oid_idx)
     assert item.text(oid_idx) == ''
 
@@ -1467,7 +1469,7 @@ def test_commit_find_no_matches(qapp, app_context):
 
 def test_commit_find_rescans_added_commits(qapp, app_context):
     """Commits added after a search are found by the next one"""
-    tree, find, items = _find_tree(app_context)
+    tree, find, _items = _find_tree(app_context)
     find.text.setText('fix')
     newer = _commit_for_graph(app_context, f'{99:040x}')
     newer.summary = 'fix in a newer commit'
@@ -1561,7 +1563,7 @@ def test_commit_find_drops_git_results_for_old_text(qapp, app_context, monkeypat
 def test_commit_find_skips_git_for_short_text_and_unchecked_boxes(
     qapp, app_context, monkeypatch
 ):
-    tree, find, items, calls = _git_find_tree(app_context, monkeypatch, {})
+    _tree, find, _items, calls = _git_find_tree(app_context, monkeypatch, {})
     # "x" only appears in the "fix number" summaries.
     find.text.setText('x')
     assert not find._git_timer.isActive()
@@ -1786,7 +1788,7 @@ def _highlighted_pixels(image):
 
 def test_commit_find_highlights_the_matched_text(qapp, app_context):
     """The matches are marked in the painted list, with and without the graph"""
-    tree, find, _items = _find_tree(app_context)
+    tree, _find, _items = _find_tree(app_context)
     tree.resize(600, 220)
     tree.setColumnWidth(CommitTreeWidgetItem.SUMMARY, 300)
     palette = tree.palette()
