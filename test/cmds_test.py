@@ -382,6 +382,7 @@ def refresh_state():
         cmds.Refresh._timer = None
         cmds.Refresh._in_flight = None
         cmds.Refresh._rerun = False
+        cmds.Refresh._startup = False
 
     reset()
     yield
@@ -493,6 +494,39 @@ def test_refresh_triggered_during_a_read_runs_once_more_after_it(refresh_state):
     timer.start.assert_called_once_with()
     cmds.Refresh._flush()
     assert len(context.runtask.started) == 1
+
+
+def test_refresh_startup_reads_in_the_background(refresh_state):
+    """The first read takes cola.updateindex and is pending until applied"""
+    context = _background_context()
+    cmds.Refresh.startup(context, update_index=False)
+
+    context.model.status_query.assert_called_once_with(update_index=False)
+    assert len(context.runtask.started) == 1
+    assert cmds.Refresh.startup_pending(context)
+
+    context.runtask.finish()
+    context.model.apply_status.assert_called_once()
+    assert not cmds.Refresh.startup_pending(context)
+
+
+def test_refresh_startup_is_not_pending_for_another_view(refresh_state):
+    """A startup read whose RunTask went away no longer counts"""
+    context = _background_context()
+    cmds.Refresh.startup(context)
+    context.runtask = _FakeRunTask()
+    assert not cmds.Refresh.startup_pending(context)
+
+
+def test_refresh_after_startup_is_not_pending(refresh_state):
+    """Later reads are ordinary refreshes"""
+    context = _background_context()
+    cmds.Refresh.startup(context)
+    context.runtask.finish()
+    cmds.Refresh._last_refresh = 0.0
+    cmds.Refresh(context).do()
+    assert len(context.runtask.started) == 1
+    assert not cmds.Refresh.startup_pending(context)
 
 
 def test_refresh_is_not_blocked_by_a_read_from_a_closed_view(refresh_state):
