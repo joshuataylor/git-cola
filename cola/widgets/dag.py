@@ -3207,7 +3207,7 @@ class GitDAG(standard.MainWindow):
     def _stop_reader_thread(self):
         """Stop the reader thread if it is currently running"""
         if self.thread is not None and self.thread.isRunning():
-            self.thread.requestInterruption()
+            self.thread.stop()
             QtCore.QThread.currentThread().yieldCurrentThread()
             self.thread.wait(100)
 
@@ -3779,7 +3779,7 @@ def graph_row_pairs(rows):
     return list(zip(rows, itertools.chain([None], rows)))
 
 
-class ReaderThread(QtCore.QThread):
+class ReaderThread(qtutils.Thread):
     begin = Signal()
     add = Signal(object)
     end = Signal()
@@ -3789,11 +3789,19 @@ class ReaderThread(QtCore.QThread):
         super().__init__()
         self.context = context
         self.params = params
+        self._repo = None
+
+    def stop(self):
+        """Interrupt the reader, and stop git if it is still running"""
+        self.requestInterruption()
+        repo = self._repo
+        if repo is not None:
+            repo.terminate()
 
     def run(self):
         """Gather commits and emit them to the main thread"""
         context = self.context
-        repo = dag.RepoReader(
+        repo = self._repo = dag.RepoReader(
             context, self.params, should_interrupt=self.isInterruptionRequested
         )
         repo.reset()

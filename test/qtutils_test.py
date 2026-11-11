@@ -1,4 +1,6 @@
 """Tests for cola.qtutils helpers."""
+import ast
+import os
 import sys
 
 import pytest
@@ -310,3 +312,31 @@ def test_thread_deleted_before_quit_is_disconnected(qapp):
     # Calling halt() on the deleted thread would raise inside the slot and
     # abort the process.
     qapp.aboutToQuit.emit()
+
+
+def _direct_qthread_subclasses():
+    """Yield (path, class name) for each class in cola/ that subclasses QThread"""
+    root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cola')
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if not filename.endswith('.py'):
+                continue
+            path = os.path.join(dirpath, filename)
+            with open(path, encoding='utf-8') as handle:
+                tree = ast.parse(handle.read(), filename=path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                for base in node.bases:
+                    if ast.unparse(base) in ('QThread', 'QtCore.QThread'):
+                        yield os.path.relpath(path, root), node.name
+
+
+def test_threads_derive_from_qtutils_thread():
+    """A plain QThread still running at teardown aborts the process"""
+    allowed = {
+        ('qtutils.py', 'Thread'),
+        # Stopped and joined by ColaApplication.stop() through Monitor.stop().
+        ('fsmonitor.py', '_BaseThread'),
+    }
+    assert set(_direct_qthread_subclasses()) == allowed
