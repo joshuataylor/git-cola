@@ -920,6 +920,12 @@ class DiffLineNumbers(TextDecorator):
             return
 
         painter = QtGui.QPainter(self)
+        try:
+            self._paint_numbers(painter, event)
+        finally:
+            painter.end()
+
+    def _paint_numbers(self, painter, event):
         painter.fillRect(event.rect(), self._base)
 
         editor = self.editor

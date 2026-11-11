@@ -131,6 +131,7 @@ class ImageView(QtWidgets.QGraphicsView):
         )
         painter.fillRect(0, CHECK_MEDIUM, CHECK_MEDIUM, CHECK_MEDIUM, color_light)
         painter.fillRect(CHECK_MEDIUM, 0, CHECK_MEDIUM, CHECK_MEDIUM, color_light)
+        painter.end()
         self.check_pattern = check_pattern
         self.check_brush = QtGui.QBrush(check_pattern)
 

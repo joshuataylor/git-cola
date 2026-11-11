@@ -5,10 +5,12 @@ press that forms a double-click arrives only as MouseButtonDblClick. The
 sequences run without waits, so they stay inside the double-click interval.
 """
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
 from cola.widgets import text
+from cola.widgets.diff import DiffLineNumbers
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -474,3 +476,52 @@ def test_diff_filename_drag_selects_without_copying(diff_filename):
     _send(label, RELEASE, end)
     assert copied == []
     assert label.selectedText()
+
+
+_recorded_painters = []
+
+
+class _RecordingPainter:
+    """Stands in for QPainter and records whether painting was ended"""
+
+    def __init__(self, device):
+        self.device = device
+        self.ended = False
+        _recorded_painters.append(self)
+
+    def end(self):
+        self.ended = True
+
+
+def _assert_paint_event_ends_its_painter(monkeypatch, numbers):
+    """paintEvent() ends its painter even when the drawing raises
+
+    A painter left to end when its Python object is freed stays active while
+    anything holds the frame (a traceback, a profiler's sample), and Qt then
+    flushed the window under an active painter: a segfault in
+    QBackingStore::flush() under scalene.
+    """
+    _recorded_painters.clear()
+    monkeypatch.setattr(QtGui, 'QPainter', _RecordingPainter)
+
+    def fail(_painter, _event):
+        raise RuntimeError('drawing failed')
+
+    monkeypatch.setattr(numbers, '_paint_numbers', fail)
+    event = QtGui.QPaintEvent(QtCore.QRect(0, 0, 10, 10))
+    with pytest.raises(RuntimeError):
+        numbers.paintEvent(event)
+    assert [painter.ended for painter in _recorded_painters] == [True]
+
+
+def test_line_numbers_paint_event_ends_its_painter(qapp, monkeypatch):
+    editor = QtWidgets.QPlainTextEdit()
+    _assert_paint_event_ends_its_painter(monkeypatch, text.LineNumbers(editor))
+
+
+def test_diff_line_numbers_paint_event_ends_its_painter(qapp, monkeypatch):
+    context = MagicMock()
+    context.cfg.get.return_value = None
+    numbers = DiffLineNumbers(context, QtWidgets.QPlainTextEdit())
+    numbers.lines = [(1, 1)]  # paintEvent() returns early with no lines.
+    _assert_paint_event_ends_its_painter(monkeypatch, numbers)
