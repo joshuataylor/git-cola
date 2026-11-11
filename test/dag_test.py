@@ -1,6 +1,8 @@
 """Tests DAG functionality"""
 import os
 import sys
+import threading
+import time
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -262,12 +264,40 @@ def test_repo_reader_stops_when_interrupted(core, dag_context):
     core.start_command.return_value = proc
     core.readline.side_effect = [line + '\n' for line in LOG_LINES] + ['']
 
-    # Interrupt as soon as the first line is read.
+    # Interrupted before git has printed anything.
     dag_context.reader._should_interrupt = lambda: True
     commits = list(dag_context.reader.get())
 
     assert commits == []
     proc.terminate.assert_called_once()
+    core.readline.assert_not_called()
+
+
+def test_repo_reader_terminate_ends_a_blocked_read(dag_context):
+    """terminate() from another thread ends a read git has not answered yet"""
+    reader = dag_context.reader
+    # A stand-in for "git log -S" over a long history: no output for a while.
+    timer = threading.Timer(0.2, reader.terminate)
+    started = time.monotonic()
+    timer.start()
+    try:
+        status, entries = reader._read_log(['sh', '-c', 'exec sleep 30'])
+    finally:
+        timer.cancel()
+    assert time.monotonic() - started < 10
+    assert status != 0
+    assert entries == []
+    assert reader._proc is None
+
+
+def test_reader_thread_stop_terminates_git(qapp, app_context):
+    """stop() interrupts the reader and terminates its running git log"""
+    thread = dag_widgets.ReaderThread(app_context, dag.DAG('HEAD', 10))
+    # No real reader thread in the suite. Qt ignores requestInterruption() on
+    # a thread that never started, so only the terminate() is visible here.
+    thread._repo = MagicMock()
+    thread.stop()
+    thread._repo.terminate.assert_called_once()
 
 
 def test_prepare_labels_single_remote_no_condensing():
