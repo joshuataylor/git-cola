@@ -346,6 +346,8 @@ class RepoReader:
         # closed) can stop the subprocess promptly. Defaults to never-interrupt
         # for the synchronous callers.
         self._should_interrupt = should_interrupt or (lambda: False)
+        # The running "git log", so terminate() can stop it from another thread.
+        self._proc: subprocess.Popen | None = None
         self._objects: dict[str, Commit] = {}
         self._factory = CommitFactory()
         self._cmd = [
@@ -432,19 +434,42 @@ class RepoReader:
             proc = core.start_command(cmd, stderr=subprocess.DEVNULL)
         except OSError:
             return 1, []
+        self._proc = proc
+        try:
+            return self._read_lines(proc)
+        finally:
+            self._proc = None
+
+    def _read_lines(self, proc: subprocess.Popen) -> tuple[int, list[str]]:
         log_entries: list[str] = []
         stdout = proc.stdout
-        while True:
+        # Checked once before the first read as well: an interruption that
+        # came before the process existed could not terminate() it.
+        while not self._should_interrupt():
             line = core.readline(stdout)
             if not line:
                 break
-            if self._should_interrupt():
-                proc.terminate()
-                core.wait(proc)
-                return proc.returncode, []
             log_entries.append(line.rstrip('\r\n'))
+        if self._should_interrupt():
+            proc.terminate()
+            core.wait(proc)
+            return proc.returncode, []
         status = core.wait(proc)
         return status, log_entries
+
+    def terminate(self) -> None:
+        """Stop the running "git log" from another thread
+
+        The reader only notices an interruption between lines, and git can
+        take a long time to print its first one (--topo-order over a long
+        history, a -S or -G search). Terminating git ends the blocked read.
+        """
+        proc = self._proc
+        if proc is not None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
 
     def get_worktree_commits(self) -> tuple[Commit | None, Commit | None]:
         """A Commit object that represents unstaged modified changes in a worktree"""
