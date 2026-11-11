@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -1122,6 +1123,75 @@ def _reader_dag(app_context):
     win.add_commits = MagicMock()
     win.thread_end = MagicMock()
     return win
+
+
+class _HeldDisplayTasks:
+    """A RunTask stand-in that holds tasks until the test finishes them"""
+
+    def __init__(self):
+        self.started = []
+
+    def start(self, task, result=None):
+        self.started.append((task, result))
+
+    def finish(self, index=0):
+        task, result = self.started.pop(index)
+        result(task.task())
+
+
+def _display_dag(app_context, monkeypatch):
+    """A GitDAG stand-in with just what display() and its apply step read"""
+    win = GitDAG.__new__(GitDAG)
+    QtWidgets.QMainWindow.__init__(win)
+    win.context = app_context
+    win.model = MagicMock()
+    win.model.currentbranch = 'main'
+    win.revtext = SimpleNamespace(text=lambda: 'HEAD')
+    win.maxresults = SimpleNamespace(value=lambda: 100)
+    win.display_status_action = SimpleNamespace(isChecked=lambda: False)
+    win._display_timer = MagicMock()
+    win._display_runtask = _HeldDisplayTasks()
+    win._display_serial = 0
+    win.params = dag.DAG('HEAD', 10)
+    win.old_refs = set()
+    win.old_oids = None
+    win.old_count = 0
+    win.old_display_status = None
+    win.force_refresh = False
+    win._commits_loaded = False
+    win._stop_reader_thread = MagicMock()
+    win._start_reader_thread = MagicMock()
+    read = MagicMock(return_value=({('refs/heads/main', 'a' * 40)}, ['a' * 40]))
+    monkeypatch.setattr(dag_widgets, 'read_display_state', read)
+    return win, read
+
+
+def test_display_reads_refs_off_the_gui_thread(qapp, app_context, monkeypatch):
+    """for-each-ref held the GUI thread for 1-2 s on a large repository"""
+    win, read = _display_dag(app_context, monkeypatch)
+    win.display()
+    read.assert_not_called()  # Only queued, for a worker thread.
+    win._start_reader_thread.assert_not_called()
+
+    win._display_runtask.finish()
+    read.assert_called_once_with(app_context, 'HEAD', 'main')
+    win._start_reader_thread.assert_called_once()
+    assert win.old_oids == ['a' * 40]
+    assert win.old_count == 100
+
+
+def test_display_drops_a_superseded_read(qapp, app_context, monkeypatch):
+    """Only the newest display() applies, whatever order the reads finish in"""
+    win, _read = _display_dag(app_context, monkeypatch)
+    win.display()
+    win.maxresults = SimpleNamespace(value=lambda: 200)
+    win.display()
+
+    win._display_runtask.finish(1)  # The newer read finishes first.
+    win._display_runtask.finish(0)
+    win._start_reader_thread.assert_called_once()
+    assert win.params.count == 200
+    assert win.old_count == 200
 
 
 def test_a_reader_still_stopping_is_replaced_not_reused(qapp, app_context):

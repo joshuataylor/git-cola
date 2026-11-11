@@ -2838,6 +2838,9 @@ class GitDAG(standard.MainWindow):
         self.old_count = 0
         self.old_display_status = None
         self.force_refresh = False
+        # display() reads the refs on a worker. Only the newest read applies.
+        self._display_runtask = qtutils.RunTask(parent=self)
+        self._display_serial = 0
         self._widgets_initialized = False
         self._graph_stale = False
         """The graphview needs (re)building from the current commit_list"""
@@ -3371,8 +3374,8 @@ class GitDAG(standard.MainWindow):
         """Create the timer that coalesces model updates into one display()
 
         fsmonitor and refresh events arrive in bursts, and every display()
-        call runs a "git rev-parse" on the GUI thread before its no-op guard
-        can decide anything, so bursts are debounced into a single pass.
+        runs "git for-each-ref" and "git rev-parse" before its no-op guard can
+        decide anything, so bursts are debounced into a single pass.
         """
         self._display_timer = QtCore.QTimer(self)
         self._display_timer.setSingleShot(True)
@@ -3413,28 +3416,36 @@ class GitDAG(standard.MainWindow):
         cmds.do(cmds.Refresh, self.context)
 
     def display(self):
-        """Update the view when the Git refs change"""
+        """Update the view when the Git refs change
+
+        The git commands that detect a change run on a worker thread. On a
+        large repository they held the GUI thread for 1-2 s on every display.
+        """
         # A direct call supersedes any debounced pass still pending.
         self._display_timer.stop()
         ref = get(self.revtext)
         count = get(self.maxresults)
-        context = self.context
         display_status = get(self.display_status_action)
-        # The DAG tries to avoid updating when the object IDs have not
-        # changed.  Without doing this the DAG constantly redraws itself
-        # whenever inotify sends update events, which hurts usability.
-        #
-        # To minimize redraws we leverage `git rev-parse`.  The strategy is to
-        # use `git rev-parse` on the input line, which converts each argument
-        # into object IDs.  From there it's a simple matter of detecting when
-        # the object IDs changed.
-        #
-        # In addition to object IDs, we also need to know when the set of
-        # named references (branches, tags) changes so that an update is
-        # triggered when new branches and tags are created.
-        refs = self._ref_state()
-        argv = utils.shell_split(ref or 'HEAD')
-        oids = gitcmds.parse_refs(context, argv)
+        self._display_serial += 1
+        task = qtutils.SimpleTask(
+            read_display_state, self.context, ref, self.model.currentbranch
+        )
+        self._display_runtask.start(
+            task,
+            result=partial(
+                self._apply_display_state,
+                self._display_serial,
+                ref,
+                count,
+                display_status,
+            ),
+        )
+
+    def _apply_display_state(self, serial, ref, count, display_status, state):
+        """Reload or relabel for a display() whose refs were read, on the GUI thread"""
+        if serial != self._display_serial:
+            return  # A newer display() supersedes this one.
+        refs, oids = state
         update = (
             self.force_refresh
             or count != self.old_count
@@ -3464,7 +3475,7 @@ class GitDAG(standard.MainWindow):
 
     def _ref_state(self):
         """Every ref and the commit it points to, plus the checked-out branch"""
-        return gitcmds.ref_targets(self.context) | {('HEAD', self.model.currentbranch)}
+        return ref_state(self.context, self.model.currentbranch)
 
     def relabel_commits(self, old_refs, new_refs):
         """Re-read the labels of the commits whose refs changed, without a reload"""
@@ -3756,6 +3767,25 @@ class GitDAG(standard.MainWindow):
         if not self._widgets_initialized:
             self._widgets_initialized = True
             self.maxresults.setMinimumHeight(self.revtext.height())
+
+
+def ref_state(context, currentbranch):
+    """Every ref and the commit it points to, plus the checked-out branch"""
+    return gitcmds.ref_targets(context) | {('HEAD', currentbranch)}
+
+
+def read_display_state(context, ref, currentbranch):
+    """Read what GitDAG.display() compares, on a worker thread
+
+    The DAG avoids reloading when nothing it shows has changed: without that
+    it redrew itself whenever inotify sent an update. `git rev-parse` turns
+    the revision text into object IDs, which change when the commits do. The
+    set of refs and their targets changes when branches and tags move or are
+    created, which only needs a relabel.
+    """
+    refs = ref_state(context, currentbranch)
+    oids = gitcmds.parse_refs(context, utils.shell_split(ref or 'HEAD'))
+    return refs, oids
 
 
 # Commits reach the commit list in chunks, so the GUI stays responsive.
