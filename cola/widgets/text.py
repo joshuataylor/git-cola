@@ -1368,6 +1368,12 @@ class LineNumbers(TextDecorator):
     def paintEvent(self, event):
         """Paint the line number"""
         painter = QtGui.QPainter(self)
+        try:
+            self._paint_numbers(painter, event)
+        finally:
+            painter.end()
+
+    def _paint_numbers(self, painter, event):
         editor = self.editor
         palette = editor.palette()
         QPalette = QtGui.QPalette
