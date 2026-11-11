@@ -49,6 +49,27 @@ def test_add_parents():
     assert expect == paths
 
 
+def test_add_parents_with_shared_and_odd_parents():
+    """Stopping at a parent seen before still adds every parent once"""
+    paths = {'a', 'a/b/c', 'a/b/d', 'a//b//e', 'a/x/y/z', '/abs/f', 'dir/', 'p/q'}
+    assert utils.add_parents(paths) == {
+        'a',
+        'a/b',
+        'a/b/c',
+        'a/b/d',
+        'a/b/e',
+        'a/x',
+        'a/x/y',
+        'a/x/y/z',
+        '/abs',
+        '/abs/f',
+        'dir',
+        'dir/',
+        'p',
+        'p/q',
+    }
+
+
 def test_tmp_filename_gives_good_file():
     try:
         first = utils.tmp_filename('test')
