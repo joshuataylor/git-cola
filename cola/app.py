@@ -7,7 +7,6 @@ import signal
 import sys
 import time
 from collections.abc import Callable
-from functools import partial
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -512,6 +511,17 @@ def open_worktree(context: ApplicationContext, worktree: str) -> None:
         cmds.do(cmds.OpenRepo, context, worktree)
 
 
+def refresh_on_focus(context: ApplicationContext) -> None:
+    """Refresh when the app is activated, for cola.refreshonfocus"""
+    if (
+        context.git.is_valid()
+        and context.cfg.get('cola.refreshonfocus', default=False)
+        # Activating the app at launch is not a return to it.
+        and not cmds.Refresh.startup_pending(context)
+    ):
+        cmds.do(cmds.Refresh, context)
+
+
 class ColaQApplication(QtWidgets.QApplication):
     """QApplication implementation for handling custom events"""
 
@@ -579,14 +589,8 @@ class ColaQApplication(QtWidgets.QApplication):
             cola_app = getattr(self.context, 'app', None)
             if cola_app:
                 QtCore.QTimer.singleShot(0, cola_app.refresh_system_appearance)
-        if e.type() == QtCore.QEvent.ApplicationActivate:
-            context = self.context
-            if context:
-                cfg = context.cfg
-                if context.git.is_valid() and cfg.get(
-                    'cola.refreshonfocus', default=False
-                ):
-                    cmds.do(cmds.Refresh, context)
+        if e.type() == QtCore.QEvent.ApplicationActivate and self.context:
+            refresh_on_focus(self.context)
         return super().event(e)
 
     def commitData(self, session_mgr) -> None:
@@ -968,12 +972,12 @@ def offer_to_create_repo(context, gitdir) -> None:
 def async_update(context: ApplicationContext) -> None:
     """Update the model in the background
 
-    git-cola should startup as quickly as possible.
+    git-cola should startup as quickly as possible. The read goes through
+    Refresh, which applies it on the GUI thread and folds in refreshes that
+    are triggered while it runs.
     """
     update_index = context.cfg.get('cola.updateindex', True)
-    update_status = partial(context.model.update_status, update_index=update_index)
-    task = qtutils.SimpleTask(update_status)
-    context.runtask.start(task)
+    cmds.Refresh.startup(context, update_index=update_index)
 
 
 def startup_message() -> None:

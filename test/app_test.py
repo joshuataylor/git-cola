@@ -512,3 +512,37 @@ def test_set_process_title_leaves_the_app_bundle_alone(monkeypatch):
     app.set_process_title()
 
     assert calls == []
+
+
+def _focus_context(refresh_on_focus=True):
+    context = MagicMock()
+    context.git.is_valid.return_value = True
+    context.cfg.get.side_effect = lambda key, default=None: (
+        refresh_on_focus if key == 'cola.refreshonfocus' else default
+    )
+    return context
+
+
+def test_refresh_on_focus_refreshes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.cmds, 'do', lambda cls, ctx: calls.append(cls))
+    monkeypatch.setattr(app.cmds.Refresh, 'startup_pending', lambda ctx: False)
+    app.refresh_on_focus(_focus_context())
+    assert calls == [app.cmds.Refresh]
+
+
+def test_refresh_on_focus_skips_the_activation_at_launch(monkeypatch):
+    """The startup read is already reading: a second read was dropped as stale"""
+    calls = []
+    monkeypatch.setattr(app.cmds, 'do', lambda cls, ctx: calls.append(cls))
+    monkeypatch.setattr(app.cmds.Refresh, 'startup_pending', lambda ctx: True)
+    app.refresh_on_focus(_focus_context())
+    assert calls == []
+
+
+def test_refresh_on_focus_is_off_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.cmds, 'do', lambda cls, ctx: calls.append(cls))
+    monkeypatch.setattr(app.cmds.Refresh, 'startup_pending', lambda ctx: False)
+    app.refresh_on_focus(_focus_context(refresh_on_focus=False))
+    assert calls == []

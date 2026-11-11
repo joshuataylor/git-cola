@@ -3141,6 +3141,8 @@ class Refresh(Command):
     # its view never reports back, so it must not block later refreshes.
     _in_flight: qtutils.RunTask | None = None
     _rerun = False
+    # The read in flight is the first one, started at launch.
+    _startup = False
 
     UNDOABLE = False
 
@@ -3157,17 +3159,34 @@ class Refresh(Command):
         return True
 
     @classmethod
-    def _refresh(cls, context) -> None:
+    def startup(cls, context, update_index: bool = True) -> None:
+        """Read the status for the first time, on a worker thread"""
+        cls._startup = True
+        cls._refresh(context, update_index=update_index)
+
+    @classmethod
+    def startup_pending(cls, context) -> bool:
+        """Is the first status read still running?
+
+        The app is activated at launch, while that read runs. Refreshing on
+        that activation read the status a second time, and the startup read
+        then made the second result stale, so it was read a third time.
+        """
+        return cls._startup and cls._in_flight is context.runtask
+
+    @classmethod
+    def _refresh(cls, context, update_index: bool = True) -> None:
         cls._last_refresh = time.time()
         if context.runtask is None:  # No view yet, so no worker threads.
-            context.model.update_status(update_index=True)
+            cls._startup = False
+            context.model.update_status(update_index=update_index)
             cls._refreshed(context)
             return
         if cls._in_flight is context.runtask:
             cls._rerun = True
             return
         cls._in_flight = context.runtask
-        query = context.model.status_query(update_index=True)
+        query = context.model.status_query(update_index=update_index)
         task = qtutils.SimpleTask(_read_status, context.model, query)
         context.runtask.start(task, result=lambda result: cls._apply(context, result))
 
@@ -3175,6 +3194,7 @@ class Refresh(Command):
     def _apply(cls, context, result) -> None:
         """Apply a background status read on the GUI thread"""
         cls._in_flight = None
+        cls._startup = False
         cls._last_refresh = time.time()
         model = context.model
         if isinstance(result, Exception):
