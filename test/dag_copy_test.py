@@ -26,7 +26,7 @@ class _Viewer(dag.ViewerMixin):
     """Drive ViewerMixin directly with a stubbed selection.
 
     Avoids building a real Qt widget so the test stays deterministic in the
-    full suite (see CLAUDE.local.md "Prefer deterministic widget tests").
+    full suite, where the shared QApplication makes real widget tests flaky.
     """
 
     def __init__(self, items, clicked=None):
