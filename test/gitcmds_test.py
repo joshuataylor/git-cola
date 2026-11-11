@@ -480,6 +480,26 @@ def test_ref_targets_peel_tags_to_their_commit(app_context):
     assert ('refs/tags/heavy', head) in targets
 
 
+def test_ref_targets_peel_packed_and_nested_tags(app_context):
+    """Packed refs carry their peeled oid, and a tag of a tag peels to the commit"""
+    helper.commit_files()
+    head = helper.run_git('rev-parse', 'HEAD').strip()
+    helper.run_git('tag', '-a', '-m', 'annotated', 'heavy')
+    helper.run_git('tag', '-a', '-m', 'nested', 'nested', 'heavy')
+    helper.run_git('pack-refs', '--all')
+    helper.run_git('tag', '-a', '-m', 'loose', 'loose')
+    targets = gitcmds.ref_targets(app_context)
+    assert ('refs/tags/heavy', head) in targets
+    assert ('refs/tags/nested', head) in targets
+    assert ('refs/tags/loose', head) in targets
+    assert not any(name.endswith('^{}') for name, _ in targets)
+
+
+def test_ref_targets_without_refs_is_empty(app_context):
+    """A fresh "git init" has no refs, and show-ref exits 1"""
+    assert gitcmds.ref_targets(app_context) == frozenset()
+
+
 def test_commit_decorations_match_the_dag_log(app_context):
     helper.commit_files()
     first = helper.run_git('rev-parse', 'HEAD').strip()
