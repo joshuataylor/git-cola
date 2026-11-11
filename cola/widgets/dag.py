@@ -82,7 +82,11 @@ def git_dag(
         view.set_params(params)
     if show:
         view.show()
-    if params.ref:
+    # A standalone git-dag starts before the model's first status read, so
+    # there is no branch yet. Read HEAD now rather than after that read, which
+    # took 2 s on a 488k-file worktree. The worktree and stage rows come from
+    # that read, so with them shown the DAG still waits for it.
+    if params.ref or not get(view.display_status_action):
         view.display()
     return view
 
@@ -3427,9 +3431,7 @@ class GitDAG(standard.MainWindow):
         count = get(self.maxresults)
         display_status = get(self.display_status_action)
         self._display_serial += 1
-        task = qtutils.SimpleTask(
-            read_display_state, self.context, ref, self.model.currentbranch
-        )
+        task = qtutils.SimpleTask(read_display_state, self.context, ref)
         self._display_runtask.start(
             task,
             result=partial(
@@ -3475,7 +3477,7 @@ class GitDAG(standard.MainWindow):
 
     def _ref_state(self):
         """Every ref and the commit it points to, plus the checked-out branch"""
-        return ref_state(self.context, self.model.currentbranch)
+        return ref_state(self.context)
 
     def relabel_commits(self, old_refs, new_refs):
         """Re-read the labels of the commits whose refs changed, without a reload"""
@@ -3769,12 +3771,25 @@ class GitDAG(standard.MainWindow):
             self.maxresults.setMinimumHeight(self.revtext.height())
 
 
-def ref_state(context, currentbranch):
+def head_branch(context):
+    """The checked-out branch, or "HEAD" when detached, as the model names it
+
+    Read from git rather than the model, which a standalone git-dag only
+    fills in once the status read that starts with it has finished.
+    """
+    status, out, _ = context.git.symbolic_ref('-q', 'HEAD', _readonly=True)
+    name = out.strip() if status == 0 else ''
+    if name.startswith('refs/heads/'):
+        return name[len('refs/heads/') :]
+    return 'HEAD'
+
+
+def ref_state(context):
     """Every ref and the commit it points to, plus the checked-out branch"""
-    return gitcmds.ref_targets(context) | {('HEAD', currentbranch)}
+    return gitcmds.ref_targets(context) | {('HEAD', head_branch(context))}
 
 
-def read_display_state(context, ref, currentbranch):
+def read_display_state(context, ref):
     """Read what GitDAG.display() compares, on a worker thread
 
     The DAG avoids reloading when nothing it shows has changed: without that
@@ -3783,7 +3798,7 @@ def read_display_state(context, ref, currentbranch):
     set of refs and their targets changes when branches and tags move or are
     created, which only needs a relabel.
     """
-    refs = ref_state(context, currentbranch)
+    refs = ref_state(context)
     oids = gitcmds.parse_refs(context, utils.shell_split(ref or 'HEAD'))
     return refs, oids
 
