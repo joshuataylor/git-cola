@@ -2,6 +2,8 @@
 from __future__ import annotations
 import os
 import re
+import sys
+import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
@@ -30,6 +32,7 @@ from . import hotkeys
 from . import icons
 from . import utils
 from .i18n import N_
+from .interaction import Interaction
 from .models import prefs
 from .widgets import defs
 
@@ -1559,13 +1562,27 @@ class Task(QtCore.QRunnable):
 
         self.channel = Channel()
         self.result: tuple[Any, ...] | None = None
+        # The exception task() raised, if it failed, with its formatted traceback.
+        self.error: Exception | None = None
+        self.error_details = ''
         # Python's garbage collector will try to double-free the task
         # once it's finished so disable the Qt auto-deletion.
         self.setAutoDelete(False)
 
     def run(self) -> None:
-        self.result = self.task()
-        self.channel.result.emit(self.result)
+        # An exception escaping QRunnable.run() reaches PyQt's qFatal() and
+        # aborts the whole application, so a failing task reports instead:
+        # on stderr here, and in a dialog from RunTask.finish().
+        try:
+            self.result = self.task()
+        except Exception as exc:  # noqa: BLE001
+            self.error = exc
+            self.error_details = ''.join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+            sys.stderr.write(self.error_details)
+        else:
+            self.channel.result.emit(self.result)
         self.channel.finished.emit(self)
 
     def task(self) -> tuple:
@@ -1662,6 +1679,14 @@ class RunTask(QtCore.QObject):
             if hasattr(progress, 'stop'):
                 progress.stop()
             progress.hide()
+
+        if task.error is not None:
+            # The callbacks expect a result, so a failed task skips them.
+            message = f'{type(task.error).__name__}: {task.error}'
+            Interaction.critical(
+                N_('Error'), message=message, details=task.error_details
+            )
+            return
 
         if result is not None:
             result(task.result)

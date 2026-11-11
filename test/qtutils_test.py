@@ -1,7 +1,9 @@
 """Tests for cola.qtutils helpers."""
 import ast
 import os
+import subprocess
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -340,3 +342,86 @@ def test_threads_derive_from_qtutils_thread():
         ('fsmonitor.py', '_BaseThread'),
     }
     assert set(_direct_qthread_subclasses()) == allowed
+
+
+def _raise_value_error():
+    raise ValueError('task failed')
+
+
+def test_failing_task_reports_instead_of_raising(qapp):
+    """An exception escaping QRunnable.run() aborts the app through qFatal()"""
+    task = qtutils.SimpleTask(_raise_value_error)
+    results = []
+    finished = []
+    task.channel.result.connect(results.append, type=Qt.DirectConnection)
+    task.channel.finished.connect(finished.append, type=Qt.DirectConnection)
+
+    task.run()  # Called directly, so no thread pool is involved.
+
+    assert isinstance(task.error, ValueError)
+    assert 'ValueError: task failed' in task.error_details
+    assert results == []
+    assert finished == [task]
+
+
+def test_run_task_reports_a_failed_task_and_skips_its_callbacks(qapp, monkeypatch):
+    critical = MagicMock()
+    monkeypatch.setattr(qtutils.Interaction, 'critical', critical)
+    runtask = qtutils.RunTask()
+    task = qtutils.SimpleTask(_raise_value_error)
+    task.run()
+    progress = MagicMock()
+    finish = MagicMock()
+    result = MagicMock()
+    runtask.tasks.append(task)
+    runtask.task_details[id(task)] = (progress, finish, result)
+
+    runtask.finish(task)
+
+    progress.stop.assert_called_once_with()
+    finish.assert_not_called()
+    result.assert_not_called()
+    critical.assert_called_once()
+    assert 'ValueError: task failed' in critical.call_args.kwargs['message']
+    assert task not in runtask.tasks
+
+
+_RAISING_TASK_SCRIPT = """
+import sys
+
+from qtpy import QtCore
+from qtpy import QtWidgets
+
+from cola import qtutils
+
+app = QtWidgets.QApplication(sys.argv[:1])
+runtask = qtutils.RunTask()
+
+
+def boom():
+    raise ValueError('task failed')
+
+
+runtask.start(qtutils.SimpleTask(boom))
+QtCore.QTimer.singleShot(500, app.quit)
+app.exec()
+QtCore.QThreadPool.globalInstance().waitForDone()
+print('survived', flush=True)
+"""
+
+
+def test_a_raising_background_task_does_not_abort_the_app():
+    """It aborted with exit code 134 before Task.run() caught exceptions"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, QT_QPA_PLATFORM='offscreen', PYTHONPATH=root)
+    result = subprocess.run(
+        [sys.executable, '-c', _RAISING_TASK_SCRIPT],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'survived' in result.stdout
+    assert 'ValueError: task failed' in result.stderr
