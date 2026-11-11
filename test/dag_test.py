@@ -1174,7 +1174,7 @@ def test_display_reads_refs_off_the_gui_thread(qapp, app_context, monkeypatch):
     win._start_reader_thread.assert_not_called()
 
     win._display_runtask.finish()
-    read.assert_called_once_with(app_context, 'HEAD', 'main')
+    read.assert_called_once_with(app_context, 'HEAD')
     win._start_reader_thread.assert_called_once()
     assert win.old_oids == ['a' * 40]
     assert win.old_count == 100
@@ -2407,3 +2407,49 @@ def test_ctrl_up_keeps_qt_behaviour_off_macos(qapp, app_context, monkeypatch):
     tree.select([middle.commit.oid])
     QTest.keyClick(tree, Qt.Key_Up, Qt.ControlModifier)
     assert tree.selectedItems() == [middle]
+
+
+@patch('cola.widgets.dag.GitDAG')
+def test_git_dag_without_a_branch_yet_reads_head_now(git_dag_cls, app_context):
+    """A standalone git-dag no longer waits for the first status read"""
+    from cola.widgets import dag as dag_widget
+
+    app_context.model.currentbranch = ''
+    view = git_dag_cls.return_value
+    view.display_status_action = SimpleNamespace(isChecked=lambda: False)
+    dag_widget.git_dag(app_context, show=False)
+    view.display.assert_called_once_with()
+
+
+@patch('cola.widgets.dag.GitDAG')
+def test_git_dag_with_worktree_rows_waits_for_the_status(git_dag_cls, app_context):
+    """The worktree and stage rows come from the model's status read"""
+    from cola.widgets import dag as dag_widget
+
+    app_context.model.currentbranch = ''
+    view = git_dag_cls.return_value
+    view.display_status_action = SimpleNamespace(isChecked=lambda: True)
+    dag_widget.git_dag(app_context, show=False)
+    view.display.assert_not_called()
+
+
+def test_repo_reader_reads_before_the_models_first_status(app_context):
+    """No local branches in the model yet: ask git whether HEAD has a commit"""
+    commit_files()
+    app_context.model.local_branches = []
+    commits = list(dag.RepoReader(app_context, dag.DAG('HEAD', 10)).get())
+    assert len(commits) == 1
+
+
+def test_repo_reader_reads_nothing_after_git_init(app_context):
+    """A fresh "git init" has no commit for git log to show"""
+    app_context.model.local_branches = []
+    assert list(dag.RepoReader(app_context, dag.DAG('HEAD', 10)).get()) == []
+
+
+def test_head_branch_names_the_branch_or_head_when_detached(app_context):
+    commit_files()
+    branch = helper.run_git('symbolic-ref', '--short', 'HEAD').strip()
+    assert dag_widgets.head_branch(app_context) == branch
+    helper.run_git('checkout', '-q', '--detach')
+    assert dag_widgets.head_branch(app_context) == 'HEAD'

@@ -397,8 +397,14 @@ class RepoReader:
         commit = None
 
         # When _allow_git_init is True then we detect the "git init" state
-        # by checking whether any local branches currently exist.
-        if not self._allow_git_init or self.context.model.local_branches:
+        # by checking whether any local branches currently exist. The model has
+        # none before its first status read, or with a detached HEAD and no
+        # branches, so ask git whether HEAD has a commit before giving up.
+        if (
+            not self._allow_git_init
+            or self.context.model.local_branches
+            or self._head_has_commit()
+        ):
             status, log_entries = self._read_log(cmd)
             oid_len = self.context.model.oid_len
             # "git log" emits newest-first; reverse to yield oldest-first.
@@ -420,6 +426,13 @@ class RepoReader:
         self._top_commit = commit
         self._cached = True
         self.returncode = status
+
+    def _head_has_commit(self) -> bool:
+        """Does HEAD point at a commit, i.e. this is not a fresh "git init"?"""
+        status, _, _ = self.git.rev_parse(
+            '--verify', '--quiet', 'HEAD^{commit}', _readonly=True
+        )
+        return status == 0
 
     def _read_log(self, cmd: list[str]) -> tuple[int, list[str]]:
         """Run the log command, reading stdout a line at a time
