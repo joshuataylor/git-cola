@@ -56,6 +56,12 @@ class ExpandableGroupBox(QtWidgets.QGroupBox):
 
     def paintEvent(self, _event):
         painter = QtWidgets.QStylePainter(self)
+        try:
+            self._paint_group_box(painter)
+        finally:
+            painter.end()
+
+    def _paint_group_box(self, painter):
         option = QtWidgets.QStyleOptionGroupBox()
         self.initStyleOption(option)
         painter.save()
